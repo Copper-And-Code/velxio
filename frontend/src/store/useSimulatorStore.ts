@@ -775,6 +775,18 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         if (mainFile) {
           esp32Bridge.setPendingMicroPythonCode(mainFile.content);
         }
+      } else if (board.boardKind === 'stm32-h7-core-v13') {
+        // STM32H7 path: firmware is already baked into the Renode boot script
+        // (lv_micropython ELF), so we only need to queue the user code for
+        // raw-paste REPL injection. The bridge's state machine fires once
+        // the boot banner is seen — this works whether the bridge is already
+        // connected (just rearm) or about to connect (queued for first boot).
+        const stm32Bridge = getStm32Bridge(boardId);
+        if (!stm32Bridge) return;
+        const mainFile = files.find((f) => f.name === 'main.py') ?? files[0];
+        if (mainFile) {
+          stm32Bridge.setPendingMicroPythonCode(mainFile.content);
+        }
       } else {
         // RP2040 path: load firmware + filesystem in browser
         const sim = getBoardSimulator(boardId);

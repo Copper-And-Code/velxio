@@ -54,6 +54,16 @@ export class Stm32H7Bridge {
   private _connected = false;
   private firmwarePath: string | null = null;
 
+  // ── Raw-paste REPL injection (lv_micropython on STM32H7) ─────────────────
+  // Same 3-stage handshake as Esp32Bridge: wait for the friendly REPL banner,
+  // poke the UART to flush ">>> ", drop into raw REPL with Ctrl+A, then push
+  // the user's main.py and Ctrl+D to compile + execute. The board's flash
+  // filesystem is not mountable in Renode (no QSPI image), so this is the
+  // only way to get user code running short of rebuilding the firmware.
+  private _pendingMicroPythonCode: string | null = null;
+  private _serialBuffer = '';
+  private _replState: 'idle' | 'banner_seen' | 'prompt_seen' | 'raw_repl_entered' = 'idle';
+
   constructor(boardId: string, firmwarePath: string | null = null) {
     this.boardId = boardId;
     this.firmwarePath = firmwarePath;
@@ -61,6 +71,18 @@ export class Stm32H7Bridge {
 
   get connected(): boolean {
     return this._connected;
+  }
+
+  /**
+   * Queue user MicroPython code for injection after the REPL boots.
+   * The state machine in onmessage will push it via raw REPL once it sees
+   * the banner. Call this BEFORE connect() (or before reset) so the bridge
+   * is armed when the first banner bytes arrive.
+   */
+  setPendingMicroPythonCode(code: string): void {
+    this._pendingMicroPythonCode = code;
+    this._serialBuffer = '';
+    this._replState = 'idle';
   }
 
   connect(): void {
@@ -96,6 +118,50 @@ export class Stm32H7Bridge {
           const text = (msg.data.data as string) ?? '';
           if (this.onSerialData) {
             for (const ch of text) this.onSerialData(ch);
+          }
+          // MicroPython REPL injection — 3-stage state machine. Each stage
+          // waits for a confirmed substring in the buffered serial output
+          // before advancing, so we never push code before raw REPL is up.
+          if (this._pendingMicroPythonCode || this._replState !== 'idle') {
+            this._serialBuffer += text;
+
+            // Stage 1: friendly REPL banner → poke with \r so the ">>> "
+            // prompt (which has no trailing \n) is flushed out of Renode's
+            // UART buffer.
+            if (
+              this._replState === 'idle' &&
+              this._serialBuffer.includes('Type "help()"')
+            ) {
+              this._replState = 'banner_seen';
+              setTimeout(() => this.sendSerialBytes([0x0d]), 800);
+            }
+
+            // Stage 2: ">>>" prompt seen → Ctrl+A enters raw REPL.
+            if (
+              this._replState === 'banner_seen' &&
+              this._serialBuffer.includes('>>>')
+            ) {
+              this._replState = 'prompt_seen';
+              this._serialBuffer = '';
+              setTimeout(() => this.sendSerialBytes([0x01]), 200);
+            }
+
+            // Stage 3: "raw REPL" confirmation → safe to push code + Ctrl+D.
+            if (
+              this._replState === 'prompt_seen' &&
+              this._serialBuffer.includes('raw REPL')
+            ) {
+              this._replState = 'raw_repl_entered';
+              const code = this._pendingMicroPythonCode!;
+              this._pendingMicroPythonCode = null;
+              this._serialBuffer = '';
+              setTimeout(() => this._sendCodeInRawRepl(code), 200);
+            }
+
+            // Bound the buffer in case something never matches.
+            if (this._serialBuffer.length > 8192) {
+              this._serialBuffer = this._serialBuffer.slice(-1024);
+            }
           }
           break;
         }
@@ -156,6 +222,48 @@ export class Stm32H7Bridge {
   sendSerialBytes(bytes: number[]): void {
     if (bytes.length === 0) return;
     this._send({ type: 'stm32_serial_input', data: { bytes } });
+  }
+
+  /**
+   * Strip non-ASCII from comments and normalise line endings so the
+   * MicroPython tokenizer doesn't choke (same caveats as ESP32: no wide
+   * unicode in identifiers/literals on these MCU builds).
+   */
+  private static _sanitizeForRepl(code: string): string {
+    let s = code.startsWith('﻿') ? code.slice(1) : code;
+    s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    s = s.replace(/^([ \t]*#.*)$/gm, (line) => line.replace(/[^\x00-\x7F]/g, '?'));
+    s = s.replace(/([ \t]+#.*)$/gm, (c) => c.replace(/[^\x00-\x7F]/g, '?'));
+    return s;
+  }
+
+  /**
+   * Push the user code through raw REPL. The Renode UART has no FIFO
+   * back-pressure problem (it's a software TCP socket), but we still chunk
+   * + space the writes so the lv_micropython tokenizer/parser can keep up
+   * on a 480 MHz emulated H7 — Renode runs roughly 10× slower than wall
+   * clock here, and a 50 KB script in one shot can starve the REPL task.
+   */
+  private _sendCodeInRawRepl(code: string): void {
+    const sanitized = Stm32H7Bridge._sanitizeForRepl(code);
+    const codeBytes = Array.from(new TextEncoder().encode(sanitized));
+    const CHUNK_SIZE = 128;
+    const CHUNK_DELAY_MS = 60;
+    let offset = 0;
+
+    const sendChunk = () => {
+      if (offset >= codeBytes.length) {
+        setTimeout(() => {
+          this.sendSerialBytes([0x04]); // Ctrl+D → compile & execute
+          this._replState = 'idle';
+        }, 200);
+        return;
+      }
+      this.sendSerialBytes(codeBytes.slice(offset, offset + CHUNK_SIZE));
+      offset += CHUNK_SIZE;
+      setTimeout(sendChunk, CHUNK_DELAY_MS);
+    };
+    sendChunk();
   }
 
   private _send(payload: unknown): void {
