@@ -9,6 +9,7 @@ import { Esp32 } from '../velxio-components/Esp32';
 import { Attiny85 } from '../velxio-components/Attiny85';
 import { PiPicoW } from '../velxio-components/PiPicoW';
 import { PinOverlay } from './PinOverlay';
+import { Stm32H7Display } from './Stm32H7Display';
 
 // Board visual dimensions (width × height) for the drag-overlay sizing.
 // ESP32 sizes match the wokwi-boards SVG rendered at 5 px/mm.
@@ -31,6 +32,8 @@ const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'xiao-esp32-c3': { w: 91, h: 117 },
   'aitewinrobot-esp32c3-supermini': { w: 90, h: 123 },
   attiny85: { w: 160, h: 100 },
+  // 1024×600 LTDC display at the default 0.4 CSS down-scale.
+  'stm32-h7-core-v13': { w: 410, h: 240 },
 };
 
 interface BoardOnCanvasProps {
@@ -87,6 +90,8 @@ export const BoardOnCanvas = ({
         return <Esp32 id={id} x={x} y={y} boardKind={boardKind} />;
       case 'attiny85':
         return <Attiny85 id={id} x={x} y={y} led1={led13} />;
+      case 'stm32-h7-core-v13':
+        return <Stm32H7Display id={id} x={x} y={y} />;
     }
   })();
 

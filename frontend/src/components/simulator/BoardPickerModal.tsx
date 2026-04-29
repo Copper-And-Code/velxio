@@ -11,6 +11,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   esp32: 'Xtensa LX6 dual-core, WiFi+BT, 38 GPIO (QEMU)',
   'esp32-s3': 'Xtensa LX7 dual-core, WiFi+BT, AI accel (QEMU)',
   'esp32-c3': 'RISC-V single-core, WiFi+BLE, 22 GPIO (QEMU)',
+  'stm32-h7-core-v13': 'STM32H743 Cortex-M7 480MHz, 32MB SDRAM, 1024×600 LTDC (Renode)',
 };
 
 const BOARD_ICON: Record<BoardKind, string> = {
@@ -22,6 +23,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
   esp32: '⬡',
   'esp32-s3': '⬡',
   'esp32-c3': '⬡',
+  'stm32-h7-core-v13': '▣',
 };
 
 interface BoardPickerModalProps {
@@ -39,6 +41,7 @@ const BOARDS: BoardKind[] = [
   'esp32',
   'esp32-s3',
   'esp32-c3',
+  'stm32-h7-core-v13',
 ];
 
 export const BoardPickerModal = ({ isOpen, onClose, onSelectBoard }: BoardPickerModalProps) => {

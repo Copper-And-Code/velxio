@@ -50,6 +50,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'esp32-c3': 'RISC-V single-core, WiFi+BLE, 22 GPIO (QEMU)',
   'xiao-esp32-c3': 'Seeed XIAO ESP32-C3 mini board (QEMU)',
   'aitewinrobot-esp32c3-supermini': 'ESP32-C3 SuperMini (QEMU)',
+  'stm32-h7-core-v13': 'STM32H743 Cortex-M7 480MHz, 32MB SDRAM, 1024×600 LTDC (Renode)',
   attiny85: '8-bit AVR, 8KB flash, 6 GPIO (browser)',
 };
 
@@ -70,6 +71,7 @@ const ALL_BOARDS: BoardKind[] = [
   'esp32-c3',
   'xiao-esp32-c3',
   'aitewinrobot-esp32c3-supermini',
+  'stm32-h7-core-v13',
   'attiny85',
 ];
 

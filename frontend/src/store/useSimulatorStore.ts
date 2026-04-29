@@ -12,6 +12,7 @@ import { BOARD_SUPPORTS_MICROPYTHON } from '../types/board';
 import { calculatePinPosition } from '../utils/pinPositionCalculator';
 import { useOscilloscopeStore } from './useOscilloscopeStore';
 import { RaspberryPi3Bridge } from '../simulation/RaspberryPi3Bridge';
+import { Stm32H7Bridge } from '../simulation/Stm32H7Bridge';
 import { Esp32Bridge } from '../simulation/Esp32Bridge';
 import { useEditorStore } from './useEditorStore';
 import { useVfsStore } from './useVfsStore';
@@ -248,11 +249,13 @@ const simulatorMap = new Map<
 const pinManagerMap = new Map<string, PinManager>();
 const bridgeMap = new Map<string, RaspberryPi3Bridge>();
 const esp32BridgeMap = new Map<string, Esp32Bridge>();
+const stm32BridgeMap = new Map<string, Stm32H7Bridge>();
 
 export const getBoardSimulator = (id: string) => simulatorMap.get(id);
 export const getBoardPinManager = (id: string) => pinManagerMap.get(id);
 export const getBoardBridge = (id: string) => bridgeMap.get(id);
 export const getEsp32Bridge = (id: string) => esp32BridgeMap.get(id);
+export const getStm32Bridge = (id: string) => stm32BridgeMap.get(id);
 
 // Xtensa-based ESP32 boards — use QEMU bridge (backend)
 const ESP32_KINDS = new Set<BoardKind>([
@@ -555,6 +558,12 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         const shim = new Esp32BridgeShim(bridge, pm);
         shim.onSerialData = serialCallback;
         simulatorMap.set(id, shim);
+      } else if (boardKind === 'stm32-h7-core-v13') {
+        const bridge = new Stm32H7Bridge(id);
+        bridge.onSerialData = serialCallback;
+        // Framebuffer frames are consumed directly by Stm32H7Display via
+        // getStm32Bridge(id) — no store fan-out (1024×600 frames at 5 fps).
+        stm32BridgeMap.set(id, bridge);
       } else {
         const sim = createSimulator(
           boardKind,
@@ -586,12 +595,18 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         serialBaudRate: 0,
         serialMonitorOpen: false,
         activeFileGroupId: `group-${id}`,
-        languageMode: 'arduino',
+        // STM32H7_CORE only runs lv_micropython — there is no Arduino toolchain
+        // for it, so default to MicroPython mode so the SerialMonitor exposes
+        // the REPL badge + Ctrl+C/D shortcuts and the editor opens main.py.
+        languageMode: boardKind === 'stm32-h7-core-v13' ? 'micropython' : 'arduino',
       };
 
       set((s) => ({ boards: [...s.boards, newBoard] }));
       // Create the editor file group for this board
-      useEditorStore.getState().createFileGroup(`group-${id}`);
+      useEditorStore.getState().createFileGroup(
+        `group-${id}`,
+        boardKind === 'stm32-h7-core-v13' ? 'micropython' : undefined,
+      );
       // Init VFS for Raspberry Pi 3 boards
       if (boardKind === 'raspberry-pi-3') {
         useVfsStore.getState().initBoardVfs(id);
@@ -616,6 +631,11 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       if (esp32Bridge) {
         esp32Bridge.disconnect();
         esp32BridgeMap.delete(boardId);
+      }
+      const stm32Bridge = getStm32Bridge(boardId);
+      if (stm32Bridge) {
+        stm32Bridge.disconnect();
+        stm32BridgeMap.delete(boardId);
       }
       set((s) => {
         const boards = s.boards.filter((b) => b.id !== boardId);
@@ -804,6 +824,8 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
       if (board.boardKind === 'raspberry-pi-3') {
         getBoardBridge(boardId)?.connect();
+      } else if (board.boardKind === 'stm32-h7-core-v13') {
+        getStm32Bridge(boardId)?.connect();
       } else if (isEsp32Kind(board.boardKind)) {
         // Pre-register sensors connected to this board so the QEMU worker
         // has them ready before the firmware starts executing.
@@ -947,6 +969,8 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
       if (board.boardKind === 'raspberry-pi-3') {
         getBoardBridge(boardId)?.disconnect();
+      } else if (board.boardKind === 'stm32-h7-core-v13') {
+        getStm32Bridge(boardId)?.disconnect();
       } else if (isEsp32Kind(board.boardKind)) {
         getEsp32Bridge(boardId)?.disconnect();
       } else {
@@ -1543,6 +1567,11 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         const esp32Bridge = getEsp32Bridge(boardId);
         if (esp32Bridge) {
           esp32Bridge.sendSerialBytes(Array.from(new TextEncoder().encode(text)));
+        }
+      } else if (board.boardKind === 'stm32-h7-core-v13') {
+        const stm32Bridge = getStm32Bridge(boardId);
+        if (stm32Bridge) {
+          stm32Bridge.sendSerialBytes(Array.from(new TextEncoder().encode(text)));
         }
       } else {
         getBoardSimulator(boardId)?.serialWrite(text);

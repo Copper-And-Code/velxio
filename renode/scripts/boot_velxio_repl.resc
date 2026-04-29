@@ -1,0 +1,25 @@
+:name: STM32H7_CORE VELXIO interactive REPL
+:description: Interactive boot. USART1 exposed on TCP port 3456 (telnet-style).
+
+$bin?=@/opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf
+
+using sysbus
+mach create "h743_velxio"
+machine LoadPlatformDescription @/opt/github/velxio/renode/platforms/stm32h7_core_v13.repl
+
+logLevel 3
+logFile @/opt/github/velxio/renode/logs/renode_repl.log true
+logLevel -1 sysbus.usart1
+
+# Expose USART1 on TCP port 3456 (no telnet protocol, raw)
+emulation CreateServerSocketTerminal 3456 "uart1term" false
+connector Connect sysbus.usart1 uart1term
+
+macro reset
+"""
+    cpu VectorTableOffset 0x08000000
+    sysbus LoadELF $bin
+"""
+runMacro $reset
+
+start

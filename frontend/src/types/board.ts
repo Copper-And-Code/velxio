@@ -15,6 +15,7 @@ export type BoardKind =
   | 'esp32-c3' // RISC-V RV32IMC, QEMU backend
   | 'xiao-esp32-c3' // Seeed XIAO ESP32-C3, QEMU backend
   | 'aitewinrobot-esp32c3-supermini' // ESP32-C3 SuperMini, QEMU backend
+  | 'stm32-h7-core-v13' // STM32H743 Core (Aliexpress) V13, lv_micropython, Renode backend
   | 'attiny85'; // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython';
@@ -35,6 +36,8 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'esp32-c3',
   'xiao-esp32-c3',
   'aitewinrobot-esp32c3-supermini',
+  // STM32H7 (Renode bridge) — lv_micropython firmware
+  'stm32-h7-core-v13',
 ]);
 
 export interface WifiStatus {
@@ -81,6 +84,7 @@ export const BOARD_KIND_LABELS: Record<BoardKind, string> = {
   'esp32-c3': 'ESP32-C3 DevKit',
   'xiao-esp32-c3': 'XIAO ESP32-C3',
   'aitewinrobot-esp32c3-supermini': 'ESP32-C3 SuperMini',
+  'stm32-h7-core-v13': 'STM32H743 Core V13 (1024×600 LTDC)',
   attiny85: 'ATtiny85',
 };
 
@@ -101,5 +105,6 @@ export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
   'esp32-c3': 'esp32:esp32:esp32c3',
   'xiao-esp32-c3': 'esp32:esp32:XIAO_ESP32C3',
   'aitewinrobot-esp32c3-supermini': 'esp32:esp32:esp32c3',
+  'stm32-h7-core-v13': null,
   attiny85: 'ATTinyCore:avr:attinyx5:chip=85,clock=internal16mhz',
 };

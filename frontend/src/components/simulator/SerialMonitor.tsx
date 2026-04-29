@@ -27,6 +27,7 @@ const BOARD_SHORT_LABEL: Partial<Record<string, string>> = {
   'esp32-c3': 'ESP32-C3',
   'xiao-esp32-c3': 'XIAO-C3',
   'aitewinrobot-esp32c3-supermini': 'C3 Mini',
+  'stm32-h7-core-v13': 'STM32H7',
   attiny85: 'ATtiny85',
 };
 
@@ -47,6 +48,7 @@ const BOARD_ICON: Partial<Record<string, string>> = {
   'esp32-c3': '⬡',
   'xiao-esp32-c3': '⬡',
   'aitewinrobot-esp32c3-supermini': '⬡',
+  'stm32-h7-core-v13': '▣',
   attiny85: '▪',
 };
 
@@ -67,6 +69,7 @@ const BOARD_COLOR: Partial<Record<string, string>> = {
   'esp32-c3': '#a5d6a7',
   'xiao-esp32-c3': '#a5d6a7',
   'aitewinrobot-esp32c3-supermini': '#a5d6a7',
+  'stm32-h7-core-v13': '#90caf9',
   attiny85: '#ffcc80',
 };
 

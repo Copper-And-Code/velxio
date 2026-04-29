@@ -39,6 +39,7 @@ const BOARD_PILL_ICON: Record<BoardKind, string> = {
   esp32: '⬡',
   'esp32-s3': '⬡',
   'esp32-c3': '⬡',
+  'stm32-h7-core-v13': '▣',
 };
 
 const BOARD_PILL_COLOR: Record<BoardKind, string> = {
@@ -50,6 +51,7 @@ const BOARD_PILL_COLOR: Record<BoardKind, string> = {
   esp32: '#a5d6a7',
   'esp32-s3': '#a5d6a7',
   'esp32-c3': '#a5d6a7',
+  'stm32-h7-core-v13': '#90caf9',
 };
 
 export const EditorToolbar = ({

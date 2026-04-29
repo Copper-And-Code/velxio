@@ -5,6 +5,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.services.qemu_manager import qemu_manager
 from app.services.esp_qemu_manager import esp_qemu_manager
 from app.services.esp32_lib_manager import esp_lib_manager
+from app.services.renode_manager import renode_manager
 
 
 def _find_free_port() -> int:
@@ -51,6 +52,10 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
         elif event_type == 'serial_output':
             text = data.get('data', '')
             logger.debug('[%s] serial_output uart=%s len=%d: %r', client_id, data.get('uart', 0), len(text), text[:80])
+        elif event_type == 'framebuffer':
+            logger.debug('[%s] framebuffer %dx%d %s b64=%d',
+                         client_id, data.get('width', 0), data.get('height', 0),
+                         data.get('format', '?'), len(data.get('bytes_b64', '')))
         payload = json.dumps({'type': event_type, 'data': data})
         try:
             await manager.send(client_id, payload)
@@ -84,6 +89,24 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                 pin   = msg_data.get('pin', 0)
                 state = msg_data.get('state', 0)
                 qemu_manager.set_pin_state(client_id, pin, state)
+
+            # ── STM32H7_CORE V13 (Renode backend) ────────────────────────
+            elif msg_type == 'start_stm32':
+                board    = msg_data.get('board', 'stm32-h7-core-v13')
+                firmware = msg_data.get('firmware_path')  # optional override
+                logger.info('[%s] start_stm32 board=%s firmware=%s',
+                            client_id, board, firmware or '(default)')
+                renode_manager.start_instance(client_id, board, qemu_callback,
+                                              firmware_path=firmware)
+
+            elif msg_type == 'stop_stm32':
+                renode_manager.stop_instance(client_id)
+
+            elif msg_type == 'stm32_serial_input':
+                raw_bytes = msg_data.get('bytes', [])
+                if raw_bytes:
+                    await renode_manager.send_serial_bytes(
+                        client_id, bytes(raw_bytes))
 
             # ── ESP32 lifecycle ──────────────────────────────────────────
             elif msg_type == 'start_esp32':
@@ -246,6 +269,7 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
             qemu_manager.stop_instance(client_id)
             await esp_lib_manager.stop_instance(client_id)
             esp_qemu_manager.stop_instance(client_id)
+            renode_manager.stop_instance(client_id)
         else:
             logger.info('[%s] old WS session ended; newer session is active — skipping cleanup', client_id)
     except Exception as exc:
@@ -255,3 +279,4 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
             qemu_manager.stop_instance(client_id)
             await esp_lib_manager.stop_instance(client_id)
             esp_qemu_manager.stop_instance(client_id)
+            renode_manager.stop_instance(client_id)
