@@ -80,6 +80,33 @@ _FB_MAX_BYTES = 4 * 1024 * 1024
 # SDRAM windows we accept as plausible framebuffer base addresses.
 _FB_VALID_BASES = (0xC0000000, 0xD0000000)
 
+# ANSI SGR escape stripper — Renode wraps its prompt in colour codes
+# (e.g. "\x1b[33;1m(machine) \x1b[0m"), and we need a clean ") " terminator
+# match to know when a monitor reply is fully buffered.
+_ANSI_RE = re.compile(rb'\x1b\[[0-9;]*[a-zA-Z]')
+
+# ── GPIO (STM32H7 RM0433) ────────────────────────────────────────────────────
+# Each GPIOx peripheral occupies a 1 KB region starting at 0x58020000.
+# ODR (output data register) sits at offset 0x14 and exposes bits[15:0] —
+# one bit per pin. We poll ODR for the ports that the V13 board breaks out
+# (A, B, C) plus the one carrying the on-board LEDs (B). Rate is fast enough
+# for human-visible blinking but coarse for PWM — high-frequency toggling is
+# explicitly out of scope for this transport (would need event hooks, not
+# polling).
+_GPIO_BASE = {
+    'A': 0x58020000,
+    'B': 0x58020400,
+    'C': 0x58020800,
+    'D': 0x58020C00,
+    'E': 0x58021000,
+    'F': 0x58021400,
+    'G': 0x58021800,
+    'H': 0x58021C00,
+}
+_GPIO_ODR_OFFSET = 0x14
+_GPIO_POLL_PORTS = ('A', 'B', 'C')
+_GPIO_POLL_MS = int(os.environ.get('VELXIO_STM32_GPIO_POLL_MS', '50'))
+
 
 def _strip_echo_and_prompt(text: str, sent_cmd: str) -> str:
     """Drop the command-echo line and the trailing prompt from a monitor reply.
@@ -172,6 +199,9 @@ class RenodeInstance:
         self._mon_writer:    asyncio.StreamWriter | None = None
         self._mon_lock:      asyncio.Lock = asyncio.Lock()
         self._fb_last_hash:  int = 0
+        # Per-port last-seen ODR value, keyed by port letter ('A'/'B'/...).
+        # Used by the GPIO poller to emit only on-edge transitions.
+        self._gpio_last:     dict[str, int] = {}
         self._tasks: list[asyncio.Task] = []
         self.running = False
 
@@ -213,6 +243,25 @@ class RenodeManager:
                 await inst._serial_writer.drain()
             except Exception as e:
                 logger.warning('send_serial_bytes drain: %s', e)
+
+    async def set_gpio_input(self, client_id: str, port: str,
+                             pin: int, value: bool) -> None:
+        """Drive a GPIO pin as if an external component pulled it high/low.
+
+        Maps onto Renode's `BaseGPIOPort.OnGPIO(int, bool)` method, which is
+        what `Miscellaneous.Button` uses internally — so this works for any
+        pin the firmware has configured as an input (or as a wake source).
+        """
+        inst = self._instances.get(client_id)
+        if not inst:
+            return
+        port_u = port.upper()
+        if port_u not in _GPIO_BASE or not (0 <= pin < 16):
+            logger.warning('set_gpio_input: invalid port=%s pin=%s', port, pin)
+            return
+        cmd = (f'sysbus.gpioPort{port_u} OnGPIO {pin} '
+               f'{"true" if value else "false"}')
+        await self._monitor_cmd(inst, cmd, timeout=2.0)
 
     # ── Boot sequence ─────────────────────────────────────────────────────────
 
@@ -427,7 +476,11 @@ class RenodeManager:
             pass
         logger.info('%s: monitor connected on port %d',
                     inst.client_id, inst.monitor_port)
-        # Begin LTDC framebuffer polling.
+        # Spawn the GPIO poller as a sibling task so it gets cancelled by
+        # `_shutdown` like everything else; the framebuffer loop stays
+        # inline so this coroutine pins the monitor connection's lifetime.
+        # Both pollers serialise their monitor reads via `_mon_lock`.
+        inst._tasks.append(asyncio.create_task(self._poll_gpio_loop(inst)))
         await self._poll_framebuffer_loop(inst)
 
     async def _monitor_cmd(self, inst: RenodeInstance, line: str,
@@ -459,8 +512,12 @@ class RenodeManager:
                 buf.extend(chunk)
                 if len(buf) > max_bytes:
                     break
-                # Renode prompt: "(<machine-name>) " — terminator heuristic.
-                tail = bytes(buf[-32:])
+                # Renode prompt: "(<machine-name>) " optionally wrapped in
+                # SGR colour escapes like "\x1b[33;1m(...) \x1b[0m". Strip
+                # ANSI from the tail before matching — without this every
+                # read waits the full timeout (~2 s), turning the GPIO poll
+                # into a tortoise that misses fast firmware-side toggles.
+                tail = _ANSI_RE.sub(b'', bytes(buf[-64:]))
                 if tail.endswith(b') ') and b'\n' in tail:
                     break
         return buf.decode('utf-8', 'replace')
@@ -546,6 +603,46 @@ class RenodeManager:
             except Exception as e:
                 logger.warning('%s: framebuffer poll: %s', inst.client_id, e)
                 await asyncio.sleep(1.0)
+
+    async def _poll_gpio_loop(self, inst: RenodeInstance) -> None:
+        """Poll GPIOx_ODR every `_GPIO_POLL_MS` ms, emit per-pin transitions.
+
+        Bit i of ODR reflects what the firmware has driven on pin i when the
+        pin is configured as a push-pull/open-drain output. For input or
+        alternate-function pins ODR keeps its last-written value (usually 0)
+        which is harmless — we just emit a constant 0 for those bits, and
+        consumers that aren't wired to those pins ignore them anyway.
+        """
+        delay = max(0.02, _GPIO_POLL_MS / 1000.0)
+        while inst.running:
+            try:
+                await asyncio.sleep(delay)
+                for port in _GPIO_POLL_PORTS:
+                    addr = _GPIO_BASE[port] + _GPIO_ODR_OFFSET
+                    val = await self._read_register(inst, addr)
+                    if val is None:
+                        continue
+                    val &= 0xFFFF
+                    last = inst._gpio_last.get(port)
+                    if last is not None and val == last:
+                        continue
+                    # On the first successful read for this port we emit the
+                    # full state so subscribers can hydrate their UI; after
+                    # that we only emit pins that toggled.
+                    changed = 0xFFFF if last is None else (val ^ last)
+                    inst._gpio_last[port] = val
+                    for bit in range(16):
+                        if changed & (1 << bit):
+                            await inst.emit('stm32_gpio_change', {
+                                'port':  port,
+                                'pin':   bit,
+                                'value': bool(val & (1 << bit)),
+                            })
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning('%s: gpio poll: %s', inst.client_id, e)
+                await asyncio.sleep(0.5)
 
     # ── Renode stdout watcher ─────────────────────────────────────────────────
 

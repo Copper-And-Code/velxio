@@ -108,6 +108,12 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                     await renode_manager.send_serial_bytes(
                         client_id, bytes(raw_bytes))
 
+            elif msg_type == 'stm32_gpio_input':
+                port  = str(msg_data.get('port', ''))
+                pin   = int(msg_data.get('pin', 0))
+                value = bool(msg_data.get('value', False))
+                await renode_manager.set_gpio_input(client_id, port, pin, value)
+
             # ── ESP32 lifecycle ──────────────────────────────────────────
             elif msg_type == 'start_esp32':
                 board        = msg_data.get('board', 'esp32')
