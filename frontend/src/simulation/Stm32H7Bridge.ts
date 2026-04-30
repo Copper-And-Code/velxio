@@ -6,17 +6,22 @@
  *
  * Protocol (JSON frames):
  *   Frontend → Backend
- *     { type: 'start_stm32', data: { board: 'stm32-h7-core-v13', firmware_path?: string } }
+ *     { type: 'start_stm32',        data: { board: 'stm32-h7-core-v13', firmware_path?: string } }
  *     { type: 'stop_stm32' }
  *     { type: 'stm32_serial_input', data: { bytes: number[] } }
+ *     { type: 'stm32_gpio_input',   data: { port: 'A'..'H', pin: 0..15, value: bool } }
  *
  *   Backend → Frontend
- *     { type: 'serial_output', data: { data: string } }
- *     { type: 'system',        data: { event: string } }
- *     { type: 'error',         data: { message: string } }
- *     { type: 'framebuffer',   data: { width, height, pitch, format, bytes_b64 } }
+ *     { type: 'serial_output',     data: { data: string } }
+ *     { type: 'system',            data: { event: string } }
+ *     { type: 'error',             data: { message: string } }
+ *     { type: 'framebuffer',       data: { width, height, pitch, format, bytes_b64 } }
+ *     { type: 'stm32_gpio_change', data: { port: 'A'..'H', pin: 0..15, value: bool } }
  *
- * GPIO/touch channels are not yet wired (see roadmap phase 4).
+ * GPIO direction is one-shot per pin: outputs are observed by polling each
+ * GPIOx_ODR register on the backend (see RenodeManager._poll_gpio_loop), so
+ * fast PWM is not faithfully relayed — only logic-level transitions are.
+ * Inputs are driven via Renode's BaseGPIOPort.OnGPIO method.
  */
 
 export type Stm32PixelFormat =
@@ -49,6 +54,34 @@ export class Stm32H7Bridge {
   onError: ((msg: string) => void) | null = null;
   onSystemEvent: ((event: string, data: Record<string, unknown>) => void) | null = null;
   onFramebuffer: ((fb: Stm32Framebuffer) => void) | null = null;
+
+  // GPIO subscribers as a Set so multiple consumers (the store's PinManager
+  // forwarder + Stm32H7Display's on-board LED mirror) can listen without
+  // clobbering each other's slot. The legacy `onGpioChange` accessor is
+  // kept so existing chained-prevGpio code in Stm32H7Display still works,
+  // but it now wraps `addGpioListener` under the hood.
+  private _gpioListeners = new Set<(port: string, pin: number, value: boolean) => void>();
+  private _legacyOnGpio: ((port: string, pin: number, value: boolean) => void) | null = null;
+
+  get onGpioChange():
+    | ((port: string, pin: number, value: boolean) => void)
+    | null {
+    return this._legacyOnGpio;
+  }
+  set onGpioChange(
+    cb: ((port: string, pin: number, value: boolean) => void) | null,
+  ) {
+    if (this._legacyOnGpio) this._gpioListeners.delete(this._legacyOnGpio);
+    this._legacyOnGpio = cb;
+    if (cb) this._gpioListeners.add(cb);
+  }
+  /** Add a GPIO listener that survives reassignment of `onGpioChange`. */
+  addGpioListener(
+    cb: (port: string, pin: number, value: boolean) => void,
+  ): () => void {
+    this._gpioListeners.add(cb);
+    return () => { this._gpioListeners.delete(cb); };
+  }
 
   private socket: WebSocket | null = null;
   private _connected = false;
@@ -171,6 +204,15 @@ export class Stm32H7Bridge {
         case 'error':
           this.onError?.(msg.data.message as string);
           break;
+        case 'stm32_gpio_change': {
+          const port = String(msg.data.port ?? '');
+          const pin  = Number(msg.data.pin) | 0;
+          const val  = Boolean(msg.data.value);
+          if (port && pin >= 0 && pin < 16) {
+            for (const cb of this._gpioListeners) cb(port, pin, val);
+          }
+          break;
+        }
         case 'framebuffer': {
           if (!this.onFramebuffer) break;
           const b64 = (msg.data.bytes_b64 as string) ?? '';
@@ -222,6 +264,21 @@ export class Stm32H7Bridge {
   sendSerialBytes(bytes: number[]): void {
     if (bytes.length === 0) return;
     this._send({ type: 'stm32_serial_input', data: { bytes } });
+  }
+
+  /**
+   * Drive a GPIO pin from the simulator (e.g. button press, sensor toggle).
+   * Maps onto Renode's `gpioPort{X} OnGPIO {pin} {value}`. The firmware sees
+   * this as if an external IC pulled the pin high or low.
+   */
+  setGpioInput(port: string, pin: number, value: boolean): void {
+    const p = port.toUpperCase();
+    if (p.length !== 1 || p < 'A' || p > 'H') return;
+    if (!Number.isInteger(pin) || pin < 0 || pin > 15) return;
+    this._send({
+      type: 'stm32_gpio_input',
+      data: { port: p, pin, value },
+    });
   }
 
   /**

@@ -32,8 +32,9 @@ const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'xiao-esp32-c3': { w: 91, h: 117 },
   'aitewinrobot-esp32c3-supermini': { w: 90, h: 123 },
   attiny85: { w: 160, h: 100 },
-  // 1024×600 LTDC display at the default 0.4 CSS down-scale.
-  'stm32-h7-core-v13': { w: 410, h: 240 },
+  // PCB frame (470 × 348) wrapping the 1024×600 LTDC display at 0.4 CSS scale,
+  // with 12 GPIO header pins on top + 12 on bottom.
+  'stm32-h7-core-v13': { w: 470, h: 348 },
 };
 
 interface BoardOnCanvasProps {

@@ -226,7 +226,25 @@ export const BOARD_COMPONENT_IDS = [
   'xiao-esp32-c3',
   'aitewinrobot-esp32c3-supermini',
   'attiny85',
+  'stm32-h7-core-v13',
 ];
+
+/**
+ * Encode an STM32 (port, pin) pair to a single integer for PinManager.
+ * Layout: 16 contiguous slots per port. PA0 = 0, PA15 = 15, PB0 = 16, …,
+ * PH15 = 127. The pin manager only needs uniqueness within one board, so
+ * any monotonic mapping works — this one matches the order used in the
+ * Stm32H7Display.STM32H7_PINS table for easy mental mapping.
+ */
+export function stm32EncodePin(port: string, pin: number): number {
+  const p = port.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
+  return p * 16 + (pin & 0xf);
+}
+
+export function stm32DecodePin(num: number): { port: string; pin: number } {
+  const portIdx = (num >> 4) & 0xf;
+  return { port: String.fromCharCode('A'.charCodeAt(0) + portIdx), pin: num & 0xf };
+}
 
 /**
  * Check whether a componentId represents a board (not an external component).
@@ -417,6 +435,29 @@ export function boardPinToNumber(boardId: string, pinName: string): number | nul
     // Numeric fallback
     const num = parseInt(pinName, 10);
     if (!isNaN(num) && num >= 0 && num <= 5) return num;
+    return null;
+  }
+
+  // STM32H7 CORE V13 — port-letter + pin-number → unique int via stm32EncodePin.
+  // The wokwi pin pads expose names like "PA9", "PB0", and the power rails
+  // come back as "3V3", "5V", "GND.1", "GND.2" (see STM32H7_PINS).
+  // Convention shared with the LED part: -1 = GND (negative rail / always
+  // LOW), -2 = positive rail (3V3/5V/VCC, always HIGH). Parts that only
+  // care "is this a power pin?" can keep using `< 0`.
+  if (boardId === 'stm32-h7-core-v13' || boardId.startsWith('stm32-h7-core-v13')) {
+    if (pinName.startsWith('GND')) return -1;
+    if (
+      pinName.startsWith('3V3') ||
+      pinName.startsWith('5V') ||
+      pinName.startsWith('VCC')
+    ) {
+      return -2;
+    }
+    const m = /^P([A-H])(\d{1,2})$/.exec(pinName);
+    if (m) {
+      const pin = parseInt(m[2], 10);
+      if (pin >= 0 && pin <= 15) return stm32EncodePin(m[1], pin);
+    }
     return null;
   }
 

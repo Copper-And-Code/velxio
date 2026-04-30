@@ -206,10 +206,15 @@ PartSimulationRegistry.register('led', {
       el.brightness = el.value ? 1 : 0;
     };
 
-    // Cathode pin: -1 means wired to GND (always LOW), >=0 means GPIO
+    // Pin sentinels (see boardPinMapping.ts):
+    //   -1 → wired to GND (negative rail, always LOW)
+    //   -2 → wired to 3V3/5V/VCC (positive rail, always HIGH)
+    //   ≥0 → GPIO pin number — subscribe and follow the firmware
     const cathodePin = getArduinoPinHelper('C');
     if (cathodePin === -1) {
       cathodeLow = true;
+    } else if (cathodePin === -2) {
+      cathodeLow = false; // cathode tied to VCC → reverse-biased, no current
     } else if (cathodePin !== null && cathodePin >= 0) {
       unsubs.push(
         pinManager.onPinChange(cathodePin, (_: number, state: boolean) => {
@@ -220,7 +225,11 @@ PartSimulationRegistry.register('led', {
     }
 
     const anodePin = getArduinoPinHelper('A');
-    if (anodePin !== null && anodePin >= 0) {
+    if (anodePin === -2) {
+      anodeHigh = true;  // anode tied to a positive rail → always lit
+    } else if (anodePin === -1) {
+      anodeHigh = false; // anode tied to GND → always dark
+    } else if (anodePin !== null && anodePin >= 0) {
       unsubs.push(
         pinManager.onPinChange(anodePin, (_: number, state: boolean) => {
           anodeHigh = state;

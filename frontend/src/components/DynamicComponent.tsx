@@ -13,7 +13,7 @@
 
 import React, { useRef, useEffect, useCallback } from 'react';
 import type { ComponentMetadata } from '../types/component-metadata';
-import { useSimulatorStore } from '../store/useSimulatorStore';
+import { useSimulatorStore, getBoardSimulator } from '../store/useSimulatorStore';
 import { PartSimulationRegistry } from '../simulation/parts';
 import { isBoardComponent, boardPinToNumber } from '../utils/boardPinMapping';
 
@@ -207,8 +207,42 @@ export const DynamicComponent: React.FC<DynamicComponentProps> = ({
 
     const logic = PartSimulationRegistry.get(metadata.id || id.split('-')[0]);
 
+    // Pre-resolve the simulator from the wires connected to THIS component.
+    // The active board's simulator (`simulator` from the store) is irrelevant
+    // for components — what matters is which board this component is wired
+    // to. Without this, e.g. an LED on STM32:PA9 would listen on whichever
+    // simulator happens to be active (often Arduino default), miss every
+    // GPIO event, and stay dark.
+    const resolveWiredSimulator = (): typeof simulator => {
+      const state = useSimulatorStore.getState();
+      const seen = new Set<string>();
+      const stack: string[] = [id];
+      while (stack.length) {
+        const cur = stack.pop()!;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const w of state.wires) {
+          const other =
+            w.start.componentId === cur
+              ? w.end.componentId
+              : w.end.componentId === cur
+              ? w.start.componentId
+              : null;
+          if (!other) continue;
+          if (isBoardComponent(other)) {
+            const sim = getBoardSimulator(other);
+            if (sim) return sim as typeof simulator;
+          } else if (!seen.has(other)) {
+            stack.push(other); // hop through passives toward a board
+          }
+        }
+      }
+      return simulator;
+    };
+    const wiredSim = resolveWiredSimulator();
+
     let cleanupSimulationEvents: (() => void) | undefined;
-    if (logic && logic.attachEvents && simulator) {
+    if (logic && logic.attachEvents && wiredSim) {
       // Helper to find Arduino pin connected to a component pin.
       // Traces through electrically-transparent passive components so that a
       // circuit like  LED-cathode → resistor → GND  returns -1 (GND) instead
@@ -314,7 +348,7 @@ export const DynamicComponent: React.FC<DynamicComponentProps> = ({
         return trace(id, componentPinName, 0);
       };
 
-      cleanupSimulationEvents = logic.attachEvents(el, simulator, getArduinoPin, id);
+      cleanupSimulationEvents = logic.attachEvents(el, wiredSim, getArduinoPin, id);
     }
 
     return () => {

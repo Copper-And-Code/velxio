@@ -16,7 +16,12 @@ import { Stm32H7Bridge } from '../simulation/Stm32H7Bridge';
 import { Esp32Bridge } from '../simulation/Esp32Bridge';
 import { useEditorStore } from './useEditorStore';
 import { useVfsStore } from './useVfsStore';
-import { boardPinToNumber, isBoardComponent } from '../utils/boardPinMapping';
+import {
+  boardPinToNumber,
+  isBoardComponent,
+  stm32DecodePin,
+  stm32EncodePin,
+} from '../utils/boardPinMapping';
 import { createSerialBatcher } from './serialBatcher';
 import {
   bindBoard as icBindBoard,
@@ -224,6 +229,75 @@ class Esp32BridgeShim {
   }
 }
 
+// ── Lightweight shim wrapping Stm32H7Bridge so PartSimulationRegistry parts
+// (LED, button, …) can subscribe to `simulator.pinManager.onPinChange(pin)`
+// for STM32 boards just like they do on AVR/RP2040. The numeric pin is
+// `stm32EncodePin(port, idx)` so PA0…PH15 map onto a unique 0-127 range. ──
+class Stm32BridgeShim {
+  pinManager: PinManager;
+  onSerialData: ((ch: string) => void) | null = null;
+  onPinChangeWithTime: ((pin: number, state: boolean, timeMs: number) => void) | null = null;
+  onBaudRateChange: ((baud: number) => void) | null = null;
+  private bridge: Stm32H7Bridge;
+
+  constructor(bridge: Stm32H7Bridge, pm: PinManager) {
+    this.bridge = bridge;
+    this.pinManager = pm;
+  }
+
+  /**
+   * Drive an STM32 input pin from the simulator side (e.g. button press,
+   * Interconnect carrying a wire from another board). Decoded pin numbers
+   * outside the 0-127 range are silently dropped — they correspond to power
+   * rails (-1) or unmapped pins (null upstream).
+   */
+  setPinState(pin: number, state: boolean): void {
+    if (pin < 0 || pin > 127) return;
+    const { port, pin: idx } = stm32DecodePin(pin);
+    this.bridge.setGpioInput(port, idx, state);
+  }
+  getCurrentCycles(): number {
+    return -1;
+  }
+  getClockHz(): number {
+    return 480_000_000;
+  }
+  isRunning(): boolean {
+    return this.bridge.connected;
+  }
+  serialWrite(text: string): void {
+    this.bridge.sendSerialBytes(Array.from(new TextEncoder().encode(text)));
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getADC(): any {
+    return null;
+  }
+  getMCU(): null {
+    return null;
+  }
+  start(): void {
+    /* managed by bridge */
+  }
+  stop(): void {
+    /* managed by bridge */
+  }
+  reset(): void {
+    /* managed by bridge */
+  }
+  setSpeed(_s: number): void {
+    /* no-op */
+  }
+  getSpeed(): number {
+    return 1;
+  }
+  loadHex(_hex: string): void {
+    /* no-op */
+  }
+  loadBinary(_b64: string): void {
+    /* no-op */
+  }
+}
+
 // ── Shared LEDC update handler (used by addBoard, setBoardType, initSimulator) ─
 function makeLedcUpdateHandler(boardId: string) {
   return (update: { channel: number; duty_pct: number; gpio?: number }) => {
@@ -244,7 +318,12 @@ function makeLedcUpdateHandler(boardId: string) {
 // ── Runtime Maps (outside Zustand — not serialisable) ─────────────────────
 const simulatorMap = new Map<
   string,
-  AVRSimulator | RP2040Simulator | RiscVSimulator | Esp32C3Simulator | Esp32BridgeShim
+  | AVRSimulator
+  | RP2040Simulator
+  | RiscVSimulator
+  | Esp32C3Simulator
+  | Esp32BridgeShim
+  | Stm32BridgeShim
 >();
 const pinManagerMap = new Map<string, PinManager>();
 const bridgeMap = new Map<string, RaspberryPi3Bridge>();
@@ -561,9 +640,25 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       } else if (boardKind === 'stm32-h7-core-v13') {
         const bridge = new Stm32H7Bridge(id);
         bridge.onSerialData = serialCallback;
+        // Bridge → PinManager: every ODR transition emitted by the backend
+        // poll loop becomes an `onPinChange(num)` event, which is what
+        // PartSimulationRegistry parts (LED.attachEvents, …) listen on.
+        // Use addGpioListener (survives clobber) instead of the legacy
+        // onGpioChange slot, so Stm32H7Display can independently subscribe
+        // without us racing each other on the same setter.
+        bridge.addGpioListener((port, pin, state) => {
+          const boardPm = pinManagerMap.get(id);
+          if (boardPm) boardPm.triggerPinChange(stm32EncodePin(port, pin), state);
+        });
         // Framebuffer frames are consumed directly by Stm32H7Display via
         // getStm32Bridge(id) — no store fan-out (1024×600 frames at 5 fps).
         stm32BridgeMap.set(id, bridge);
+        // Shim makes the board look like a "browser sim" to the rest of the
+        // code: simulator.pinManager → pm, simulator.setPinState(num) →
+        // bridge.setGpioInput(port, pin). DynamicComponent picks this up.
+        const shim = new Stm32BridgeShim(bridge, pm);
+        shim.onSerialData = serialCallback;
+        simulatorMap.set(id, shim);
       } else {
         const sim = createSimulator(
           boardKind,
