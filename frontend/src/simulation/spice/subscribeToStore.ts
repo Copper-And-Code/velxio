@@ -121,6 +121,20 @@ function pinNameToArduinoPin(pinName: string, boardKind: BoardKind): number {
   // Skip power/ground pins — they're handled as canonical nets
   if (group.gnd.includes(pinName) || group.vcc_pins.includes(pinName)) return -1;
 
+  // STM32H7: "PA9" / "PB0" → encoded port*16+pin (matches the PinManager
+  // numbering used by Stm32BridgeShim). Without this, SPICE never gets a
+  // voltage source for STM32 GPIO outputs and any LED wired to a GPIO sees
+  // a floating anode.
+  if (boardKind === 'stm32-h7-core-v13') {
+    const m = /^P([A-H])(\d{1,2})$/.exec(pinName);
+    if (m) {
+      const idx = parseInt(m[2], 10);
+      if (idx >= 0 && idx <= 15) {
+        return (m[1].charCodeAt(0) - 'A'.charCodeAt(0)) * 16 + idx;
+      }
+    }
+    return -1;
+  }
   // RP2040: "GP26" → 26
   if (pinName.startsWith('GP')) {
     const n = parseInt(pinName.slice(2), 10);

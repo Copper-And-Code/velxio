@@ -59,4 +59,14 @@ export const BOARD_PIN_GROUPS: Record<AllBoardKinds, BoardPinGroup> = {
   'esp32-c3': { vcc: 3.3, gnd: ['GND', 'GND.1', 'GND.2'], vcc_pins: ['3V3', 'VIN', '5V'] },
   'xiao-esp32-c3': { vcc: 3.3, gnd: ['GND'], vcc_pins: ['3V3', '5V'] },
   'aitewinrobot-esp32c3-supermini': { vcc: 3.3, gnd: ['GND'], vcc_pins: ['3V3', '5V'] },
+
+  // STM32H7_CORE V13 — 3V3 + 5V on the top header, two GND pins (GND.1/GND.2).
+  // Without this entry SPICE falls through to `default` which has no '3V3'
+  // listed, so an LED wired to STM32:3V3 sees a floating node, ngspice
+  // returns 0 current, and the LED's digital fallback is never reached.
+  'stm32-h7-core-v13': {
+    vcc: 3.3,
+    gnd: ['GND.1', 'GND.2', 'GND'],
+    vcc_pins: ['3V3', '5V', 'VCC'],
+  },
 };
