@@ -80,6 +80,59 @@ export const EditorPage: React.FC = () => {
     return unsub;
   }, []);
 
+  // ── Default board swap: arduino-uno → stm32-h7-core-v13 on fresh state ──
+  // The store seeds itself with arduino-uno + a builtin LED demo (one
+  // component on pin 13, two wires) for the Arduino landing experience.
+  // We replace that with the STM32H7_CORE V13 + MicroPython workflow that
+  // this branch is built around.
+  //
+  // No localStorage flag: the *state shape* is the source of truth. The
+  // swap fires only when the state matches the fresh-default seed
+  // exactly — single arduino-uno board + only the builtin led-demo
+  // component/wires + no compile output. The moment the user does
+  // anything (adds a board, drops a component, draws a wire, hits
+  // Compile, opens a project), the shape diverges and we leave the
+  // store alone forever after.
+  //
+  // This survives Vite restarts: after a restart the in-memory store
+  // is reseeded to the default, the shape matches again, swap fires
+  // again. Without this, restarting would resurrect the Arduino default.
+  useEffect(() => {
+    const s = useSimulatorStore.getState();
+
+    const onlyDefaultBoard =
+      s.boards.length === 1 &&
+      s.boards[0].id === 'arduino-uno' &&
+      s.boards[0].compiledProgram === null;
+    const onlyBuiltinDemo =
+      s.components.length <= 1 &&
+      s.components.every((c) => c.id === 'led-builtin') &&
+      s.wires.length <= 2 &&
+      s.wires.every((w) => w.id.startsWith('wire-builtin-'));
+
+    if (!onlyDefaultBoard) {
+      console.log('[velxio] default-board swap skipped: boards =',
+        s.boards.map((b) => b.id));
+      return;
+    }
+    if (!onlyBuiltinDemo) {
+      console.log('[velxio] default-board swap skipped: user content present',
+        { components: s.components.length, wires: s.wires.length });
+      return;
+    }
+
+    console.log('[velxio] swapping default arduino-uno → stm32-h7-core-v13');
+    // Strip the builtin Arduino LED demo first so the STM32 canvas starts
+    // clean — wires reference pins on arduino-uno that won't exist after
+    // removeBoard, and the LED itself is hard-coded for pin 13.
+    s.setWires([]);
+    s.setComponents([]);
+    const newId = s.addBoard('stm32-h7-core-v13', s.boards[0].x, s.boards[0].y);
+    s.removeBoard('arduino-uno');
+    useSimulatorStore.getState().setActiveBoardId(newId);
+    console.log('[velxio] swap complete, active board =', newId);
+  }, []);
+
   // ── GitHub star prompt (show once: 2nd visit OR after 3 min) ──────────────
   useEffect(() => {
     const STAR_KEY = 'velxio_star_prompted';

@@ -32,6 +32,22 @@ while True:
     time.sleep(1)
 `;
 
+// STM32H7_CORE V13 (lv_micropython): no Pin.toggle() in this firmware build,
+// and PB1 is the on-board green LED wired in stm32h7_core_v13.repl.
+const DEFAULT_STM32_MICROPYTHON_CONTENT = `# Velxio STM32H7_CORE V13 — Blink
+# Lights the on-board green LED (PB1) at 1 Hz.
+from machine import Pin
+import time
+
+led = Pin('B1', Pin.OUT)
+
+while True:
+    led.value(1)
+    time.sleep(1)
+    led.value(0)
+    time.sleep(1)
+`;
+
 const DEFAULT_ESP32_MICROPYTHON_CONTENT = `# MicroPython Blink for ESP32
 from machine import Pin
 import time
@@ -320,7 +336,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         let fileName: string;
         let content: string;
         const isEsp32 = groupId.includes('esp32');
-        if (isMicroPython && isEsp32) {
+        const isStm32 = groupId.includes('stm32');
+        if (isMicroPython && isStm32) {
+          fileName = 'main.py';
+          content = DEFAULT_STM32_MICROPYTHON_CONTENT;
+        } else if (isMicroPython && isEsp32) {
           fileName = 'main.py';
           content = DEFAULT_ESP32_MICROPYTHON_CONTENT;
         } else if (isMicroPython) {
