@@ -114,6 +114,12 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                 value = bool(msg_data.get('value', False))
                 await renode_manager.set_gpio_input(client_id, port, pin, value)
 
+            elif msg_type == 'stm32_touch_input':
+                tx = int(msg_data.get('x', 0))
+                ty = int(msg_data.get('y', 0))
+                tp = bool(msg_data.get('pressed', False))
+                await renode_manager.inject_touch(client_id, tx, ty, tp)
+
             # ── ESP32 lifecycle ──────────────────────────────────────────
             elif msg_type == 'start_esp32':
                 board        = msg_data.get('board', 'esp32')

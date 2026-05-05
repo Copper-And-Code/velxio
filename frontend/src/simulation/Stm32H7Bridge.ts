@@ -10,6 +10,7 @@
  *     { type: 'stop_stm32' }
  *     { type: 'stm32_serial_input', data: { bytes: number[] } }
  *     { type: 'stm32_gpio_input',   data: { port: 'A'..'H', pin: 0..15, value: bool } }
+ *     { type: 'stm32_touch_input',  data: { x: int, y: int, pressed: bool } }
  *
  *   Backend → Frontend
  *     { type: 'serial_output',     data: { data: string } }
@@ -264,6 +265,27 @@ export class Stm32H7Bridge {
   sendSerialBytes(bytes: number[]): void {
     if (bytes.length === 0) return;
     this._send({ type: 'stm32_serial_input', data: { bytes } });
+  }
+
+  /**
+   * Inject a touch event into the LTDC display.
+   *
+   * The backend writes (x, y, pressed) into a 16-byte "touch mailbox" at
+   * `0x60000000` (sramBank1 — unused by V13 firmware). A custom LVGL
+   * indev driver in the user's MicroPython demo polls that mailbox via
+   * `stm.mem32[]`. Coordinates are in display pixel space (0..1023, 0..599),
+   * so the caller is responsible for scaling from CSS / canvas-local
+   * coordinates.
+   *
+   * The backend deduplicates redundant writes, but the frontend should
+   * still throttle mouse-move bursts (e.g. via requestAnimationFrame or
+   * a 30 Hz timer) to keep the Renode monitor lock contention low.
+   */
+  sendTouch(x: number, y: number, pressed: boolean): void {
+    this._send({
+      type: 'stm32_touch_input',
+      data: { x: Math.round(x), y: Math.round(y), pressed },
+    });
   }
 
   /**

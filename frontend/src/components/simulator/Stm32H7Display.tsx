@@ -190,6 +190,30 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
           border: '1px solid #2a4a32',
           borderRadius: 2,
           overflow: 'hidden',
+          // Enable pointer events on the screen alone — the parent has
+          // pointerEvents: 'none' so the rest of the PCB silkscreen
+          // doesn't intercept canvas drags. Touch is forwarded to the
+          // backend's mailbox at 0x60000000 (see Stm32H7Bridge.sendTouch).
+          pointerEvents: 'auto',
+          cursor: 'crosshair',
+        }}
+        onPointerDown={(e) => {
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+          forwardTouch(id, e, framebuffer, true);
+        }}
+        onPointerMove={(e) => {
+          // Only forward while the mouse button is held — LVGL's pointer
+          // indev handles "released" position from the last `state` we sent.
+          if (e.buttons === 0) return;
+          forwardTouch(id, e, framebuffer, true);
+        }}
+        onPointerUp={(e) => {
+          (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+          forwardTouch(id, e, framebuffer, false);
+        }}
+        onPointerCancel={(e) => {
+          // Browser-level cancellation (e.g. system gesture) — release.
+          forwardTouch(id, e, framebuffer, false);
         }}
       >
         <canvas
@@ -276,6 +300,39 @@ const BoardLed = ({ x, y, color, on, label }: BoardLedProps) => (
     }}
   />
 );
+
+// Throttle table for `forwardTouch` so a fast drag doesn't flood the
+// backend monitor with WriteDoubleWord commands. ~30 Hz is enough for a
+// fluid LVGL indev experience, and we always pass through state changes
+// (press / release) immediately regardless of throttle.
+const TOUCH_THROTTLE_MS = 33;
+const _lastTouchAt: Record<string, number> = {};
+
+function forwardTouch(
+  boardId: string,
+  e: React.PointerEvent<HTMLDivElement>,
+  framebuffer: Stm32Framebuffer | null,
+  pressed: boolean,
+): void {
+  const fbW = framebuffer?.width  ?? 1024;
+  const fbH = framebuffer?.height ?? 600;
+  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  let x = ((e.clientX - rect.left) / rect.width)  * fbW;
+  let y = ((e.clientY - rect.top)  / rect.height) * fbH;
+  x = Math.max(0, Math.min(fbW - 1, x));
+  y = Math.max(0, Math.min(fbH - 1, y));
+
+  const key = boardId;
+  const now = performance.now();
+  const last = _lastTouchAt[key] ?? 0;
+  // Always send transitions; throttle continuous drags.
+  if (pressed && (now - last) < TOUCH_THROTTLE_MS) return;
+  _lastTouchAt[key] = now;
+
+  const bridge = getStm32Bridge(boardId);
+  bridge?.sendTouch(x, y, pressed);
+}
 
 function decodeFramebufferToRGBA(
   src: Uint8Array,

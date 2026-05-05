@@ -45,19 +45,40 @@ def _find_free_port() -> int:
 EventCallback = Callable[[str, dict], Awaitable[None]]
 
 
+# ── Touch input mailbox (Velxio extension) ───────────────────────────────────
+# A 16-byte region high up in SDRAM (31 MB into the 32 MB chip — well past
+# the LVGL framebuffer pool which grows from 0xC0000000). The backend writes
+# touch coordinates here via the Renode monitor; a custom LVGL indev driver
+# in MicroPython polls it via `stm.mem32[]`.
+#
+# Why SDRAM and not sramBank1 (FMC NOR/PSRAM at 0x60000000)? The lv_micropython
+# H7 build only initialises the FMC SDRAM controller (the SDRAM chip), not the
+# external bus banks at 0x60000000-0x9FFFFFFF — so `stm.mem32[0x60000000]`
+# from MicroPython hits an unconfigured FMC region and either silently
+# returns 0 or hardfaults the firmware. The Renode monitor talks to the
+# sysbus directly and bypasses that, so backend writes "work" but the MP
+# read side breaks. SDRAM has no such issue: the firmware needs it for the
+# framebuffer anyway, so it's fully configured by the time user code runs.
+TOUCH_MAILBOX = 0xC1F00000
+#   +0x00 (uint32) pressed (0/1)
+#   +0x04 (uint32) x (display pixel)
+#   +0x08 (uint32) y (display pixel)
+#   +0x0C (uint32) seqno (incremented per non-redundant write)
+
+
 # ── LTDC register layout (STM32H7 RM0433) ────────────────────────────────────
 LTDC_BASE      = 0x50001000
 LTDC_GCR       = LTDC_BASE + 0x018  # bit 0 = LTDCEN
-LTDC_L1CR      = LTDC_BASE + 0x100  # bit 0 = LEN  (NB: not reflected by Renode)
-LTDC_L1PFCR    = LTDC_BASE + 0x110  # bits[2:0] = pixel format (NB: not reflected by Renode)
-LTDC_L1CFBAR   = LTDC_BASE + 0x12C  # framebuffer pointer
-LTDC_L1CFBLR   = LTDC_BASE + 0x130  # bits[28:16]=pitch, [12:0]=line_len_bytes+3
-LTDC_L1CFBLNR  = LTDC_BASE + 0x134  # bits[10:0] = line count
+# Layer 1 registers — base at LTDC_BASE + 0x84 per H743 CMSIS / RM0433 §33.7
+LTDC_L1CR      = LTDC_BASE + 0x084  # bit 0 = LEN
+LTDC_L1PFCR    = LTDC_BASE + 0x094  # bits[2:0] = pixel format
+LTDC_L1CFBAR   = LTDC_BASE + 0x0AC  # framebuffer pointer
+LTDC_L1CFBLR   = LTDC_BASE + 0x0B0  # bits[28:16]=pitch, [12:0]=line_len_bytes+3
+LTDC_L1CFBLNR  = LTDC_BASE + 0x0B4  # bits[10:0] = line count
 
-# Bytes-per-pixel for each declared pixel format. The Renode `Video.STM32LTDC`
-# model does not expose the L1PFCR / L1CR registers via read-back, so we can't
-# infer the format at runtime — pick it from the env (default RGB565, which
-# matches lv_micropython's `LV_COLOR_DEPTH=16`).
+# Bytes-per-pixel per pixel format. We still pick from env (default RGB565 to
+# match lv_micropython's `LV_COLOR_DEPTH=16`) instead of decoding L1PFCR — the
+# poller doesn't currently need a runtime branch.
 _FB_FORMAT_BPP = {
     'argb8888': 4,
     'rgb888':   3,
@@ -84,6 +105,7 @@ _FB_VALID_BASES = (0xC0000000, 0xD0000000)
 # (e.g. "\x1b[33;1m(machine) \x1b[0m"), and we need a clean ") " terminator
 # match to know when a monitor reply is fully buffered.
 _ANSI_RE = re.compile(rb'\x1b\[[0-9;]*[a-zA-Z]')
+_ANSI_RE_STR = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
 
 # ── GPIO (STM32H7 RM0433) ────────────────────────────────────────────────────
 # Each GPIOx peripheral occupies a 1 KB region starting at 0x58020000.
@@ -202,6 +224,12 @@ class RenodeInstance:
         # Per-port last-seen ODR value, keyed by port letter ('A'/'B'/...).
         # Used by the GPIO poller to emit only on-edge transitions.
         self._gpio_last:     dict[str, int] = {}
+        # Touch mailbox state — last (x, y, pressed) injected so we skip
+        # redundant monitor writes during static drag/hover. seqno
+        # advances on every non-redundant write so MicroPython can detect
+        # new events even when (x, y, pressed) repeat.
+        self._touch_last: tuple[int, int, bool] | None = None
+        self._touch_seq: int = 0
         self._tasks: list[asyncio.Task] = []
         self.running = False
 
@@ -262,6 +290,54 @@ class RenodeManager:
         cmd = (f'sysbus.gpioPort{port_u} OnGPIO {pin} '
                f'{"true" if value else "false"}')
         await self._monitor_cmd(inst, cmd, timeout=2.0)
+
+    async def inject_touch(self, client_id: str,
+                           x: int, y: int, pressed: bool) -> None:
+        """Write (x, y, pressed) into the touch mailbox at TOUCH_MAILBOX.
+
+        A custom LVGL indev driver in the user's MicroPython program polls
+        these four uint32 words via `stm.mem32[]`; we keep the protocol as
+        simple as possible — no interrupts, no handshaking — so the demo
+        code stays a few lines.
+
+        Skips redundant writes (same x, y, pressed as previous call) to
+        avoid spamming the monitor under fast mouse-move bursts. Each
+        non-redundant write also advances seqno so the MP side can detect
+        repeated identical events if it cares to.
+        """
+        inst = self._instances.get(client_id)
+        if not inst:
+            return
+        x &= 0xFFFFFFFF
+        y &= 0xFFFFFFFF
+        cur = (x, y, bool(pressed))
+        if inst._touch_last == cur:
+            return
+        inst._touch_last = cur
+        inst._touch_seq = (inst._touch_seq + 1) & 0xFFFFFFFF
+        # Four sequential WriteDoubleWord commands. Each round-trip is
+        # ~5–10 ms locally; under the GPIO poll load this adds ~30–40 ms
+        # per touch event, which is well below the 50 ms LVGL indev tick.
+        #
+        # Order matters: the LVGL indev callback in the user's MP demo
+        # reads the mailbox non-atomically, so it can observe writes mid-
+        # flight. We deliberately put `pressed` LAST — that way the
+        # firmware sees `pressed=1` only after `x` and `y` are already at
+        # their final values, avoiding bogus press-at-(0,0) events that
+        # would make LVGL treat a tap as a drag-from-outside-the-widget.
+        # `seq` advances second-to-last so MP can detect a clean event
+        # boundary before the press transition.
+        for off, val in (
+            (0x04, x),
+            (0x08, y),
+            (0x0C, inst._touch_seq),
+            (0x00, 1 if pressed else 0),
+        ):
+            await self._monitor_cmd(
+                inst,
+                f'sysbus WriteDoubleWord {TOUCH_MAILBOX + off:#x} {val:#x}',
+                timeout=2.0,
+            )
 
     # ── Boot sequence ─────────────────────────────────────────────────────────
 
@@ -525,20 +601,33 @@ class RenodeManager:
     async def _read_register(self, inst: RenodeInstance, addr: int) -> int | None:
         cmd = f'sysbus ReadDoubleWord {addr:#x}'
         out = await self._monitor_cmd(inst, cmd, timeout=2.0)
-        body = _strip_echo_and_prompt(out, cmd)
-        m = re.search(r'0x([0-9A-Fa-f]+)', body)
-        if not m:
+        body = _ANSI_RE_STR.sub('', _strip_echo_and_prompt(out, cmd))
+        # The reply to ReadDoubleWord is a single hex value on its own line,
+        # but the buffer can also contain leftover bytes from the echoed
+        # command address or stray prompt fragments. Filter to candidates
+        # that look like a 32-bit-word value (ignore the echoed register
+        # address itself), then take the last one — the response always
+        # follows the echo.
+        addr_lit = f'{addr:#x}'.lower()
+        candidates = [m for m in re.findall(r'0x[0-9A-Fa-f]+', body)
+                      if m.lower() != addr_lit]
+        if not candidates:
             return None
         try:
-            return int(m.group(1), 16)
+            return int(candidates[-1], 16)
         except ValueError:
             return None
 
     async def _read_memory(self, inst: RenodeInstance,
                            addr: int, count: int) -> bytes:
         cmd = f'sysbus ReadBytes {addr:#x} {count}'
+        # Renode's monitor returns ~6 chars per byte plus framing. A 1024×600
+        # RGB565 framebuffer (~1.2 MB raw) requires ~10 MB over TCP, which can
+        # take many seconds while LVGL is also driving GPIO traffic. Scale the
+        # timeout with the size and floor it to a generous 60s.
+        timeout = max(60.0, count / 50_000)
         out = await self._monitor_cmd(
-            inst, cmd, timeout=20.0, max_bytes=count * 8 + 4096)
+            inst, cmd, timeout=timeout, max_bytes=count * 8 + 4096)
         return _parse_readbytes_response(out, sent_cmd=cmd)
 
     async def _poll_framebuffer_loop(self, inst: RenodeInstance) -> None:
@@ -552,10 +641,9 @@ class RenodeManager:
         while inst.running:
             try:
                 await asyncio.sleep(delay)
-                # Renode's STM32LTDC model exposes GCR/CFBAR/CFBLR/CFBLNR but
-                # NOT L1CR.LEN / L1PFCR. We gate on LTDCEN + a plausible
-                # framebuffer base address and treat the pixel format as a
-                # build-time constant (env override).
+                # Gate on LTDCEN + a plausible framebuffer base address; treat
+                # the pixel format as a build-time constant (env override) since
+                # we don't currently need to decode L1PFCR.
                 gcr = await self._read_register(inst, LTDC_GCR)
                 if gcr is None or not (gcr & 0x1):
                     continue                              # LTDC disabled
@@ -569,13 +657,17 @@ class RenodeManager:
                            for base in _FB_VALID_BASES):
                     continue
 
-                line_bytes_minus_3 = cfblr & 0x1FFF
-                pitch              = (cfblr >> 16) & 0x1FFF
-                height             = cfblnr & 0x7FF
+                pitch  = (cfblr >> 16) & 0x1FFF
+                height = cfblnr & 0x7FF
                 if pitch == 0 or height == 0:
                     continue
-                line_bytes = max(0, line_bytes_minus_3 - 3)
-                width      = line_bytes // bpp
+                # CFBLL[12:0] is "line length in bytes + 3" per RM0433, but
+                # HAL CMSIS writes it with `+ 7U` — using either yields a
+                # width that disagrees with the row pitch by a couple of
+                # pixels. The pitch field is unambiguous, so derive width
+                # from pitch (assumes no inter-row padding, which is the
+                # common case for packed framebuffers).
+                width = pitch // bpp
                 if width == 0 or width > 4096 or height > 2160:
                     continue
                 total = pitch * height
