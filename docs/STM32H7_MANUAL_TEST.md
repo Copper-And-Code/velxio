@@ -174,7 +174,9 @@ for _ in range(60):
 | Var                          | Default     | Descrizione                                    |
 |------------------------------|-------------|------------------------------------------------|
 | `VELXIO_STM32_FB_POLL_MS`    | `300`       | Cadenza di polling LTDC (ms)                   |
-| `VELXIO_STM32_FB_FORMAT`     | `rgb565`    | Pixel format LTDC (override)                   |
+| `VELXIO_STM32_FB_FORMAT`     | auto da `L1PFCR` | Pixel format LTDC (override diagnostico)  |
+| `VELXIO_STM32_FB_MAX_WIDTH`  | `0` con binary, `512` senza | Larghezza massima preview LTDC; `0` = full-res |
+| `VELXIO_STM32_FB_BINARY`     | `1`         | Usa socket binario Renode per leggere SDRAM; `0` = solo monitor |
 | `VELXIO_RENODE_BIN`          | `renode`    | Path al binario Renode                         |
 | `VELXIO_RENODE_LOG`          | (off)       | Set per loggare anche stderr di Renode         |
 
@@ -304,14 +306,37 @@ condividono lo stesso buffer → ogni cambio è immediatamente visibile.
 
 ### 8.5 Limiti noti di throughput
 
-Il poller framebuffer legge **1.2 MB via Renode monitor TCP** (che
-serializza i byte come testo "0xNN, "). Sotto carico GPIO poll + touch
+Il poller framebuffer full-resolution legge **1.2 MB via Renode monitor TCP**
+(che serializza i byte come testo "0xNN, "). Sotto carico GPIO poll + touch
 write + Renode CPU emulation, un ciclo completo di poll può richiedere
 **5–60 secondi** anziché i 300 ms nominali → la canvas si aggiorna
 visibilmente in ritardo rispetto agli eventi handler che pure firano
 correttamente nel REPL.
 
+Con `VELXIO_STM32_FB_BINARY=1`, il default è full-resolution
+(`VELXIO_STM32_FB_MAX_WIDTH=0`): il socket binario regge 1024×600 RGB565 e
+non degrada i font LVGL con campionamento orizzontale. Quando il socket
+binario è disabilitato, il default torna a `VELXIO_STM32_FB_MAX_WIDTH=512`:
+il framebuffer reale resta 1024×600 e le coordinate touch sono ancora in
+pixel reali, ma il trasporto verso il browser legge e spedisce una versione
+campionata per evitare il costo del monitor testuale.
+
+Quando `VELXIO_STM32_FB_BINARY=1`, Renode avvia anche un piccolo server TCP
+locale (`renode/extensions/velxio_framebuffer_server.py`) che legge
+`machine.SystemBus.ReadBytes` e restituisce byte raw con il protocollo
+`VXFB/VXFR`. Il backend usa quel socket per `_read_memory`; se non è
+disponibile o fallisce, torna automaticamente al monitor testuale.
+Lo stesso socket viene usato anche per le scritture touch `WriteDoubleWord`,
+serializzate con le letture framebuffer per non corrompere il protocollo.
+
+Dopo il primo frame completo, il backend emette `framebuffer_patch` riga per
+riga solo quando il contenuto campionato cambia. Il canvas viene aggiornato
+subito alla ricezione della patch, senza aspettare la fine della scansione
+successiva del framebuffer intero.
+
 Mitigazioni:
+- Abbassare `VELXIO_STM32_FB_MAX_WIDTH` (es. `384` o `256`) se serve più
+  interattività della preview
 - Aumentare `VELXIO_STM32_FB_POLL_MS=2000`+ per ridurre il numero di
   letture concorrenti
 - Implementare protocollo dirty-rect (LVGL flush_cb pubblica solo le

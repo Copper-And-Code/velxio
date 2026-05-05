@@ -18,6 +18,7 @@ import os
 import pty
 import re
 import socket
+import struct
 import subprocess
 import tempfile
 import tty
@@ -30,6 +31,7 @@ _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 _REPO_ROOT   = os.path.abspath(os.path.join(_BACKEND_DIR, '..'))
 RENODE_BIN   = os.environ.get('RENODE_BIN', 'renode')
 REPL_PATH    = os.path.join(_REPO_ROOT, 'renode', 'platforms', 'stm32h7_core_v13.repl')
+FB_SERVER_PY = os.path.join(_REPO_ROOT, 'renode', 'extensions', 'velxio_framebuffer_server.py')
 DEFAULT_FW   = os.environ.get(
     'STM32H7_CORE_FIRMWARE',
     '/opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf',
@@ -76,9 +78,8 @@ LTDC_L1CFBAR   = LTDC_BASE + 0x0AC  # framebuffer pointer
 LTDC_L1CFBLR   = LTDC_BASE + 0x0B0  # bits[28:16]=pitch, [12:0]=line_len_bytes+3
 LTDC_L1CFBLNR  = LTDC_BASE + 0x0B4  # bits[10:0] = line count
 
-# Bytes-per-pixel per pixel format. We still pick from env (default RGB565 to
-# match lv_micropython's `LV_COLOR_DEPTH=16`) instead of decoding L1PFCR — the
-# poller doesn't currently need a runtime branch.
+# Bytes-per-pixel per LTDC pixel format. By default the poller decodes L1PFCR
+# at runtime; VELXIO_STM32_FB_FORMAT is only a diagnostic override.
 _FB_FORMAT_BPP = {
     'argb8888': 4,
     'rgb888':   3,
@@ -89,12 +90,33 @@ _FB_FORMAT_BPP = {
     'al44':     1,
     'al88':     2,
 }
-_FB_FORMAT = os.environ.get('VELXIO_STM32_FB_FORMAT', 'rgb565').lower()
-if _FB_FORMAT not in _FB_FORMAT_BPP:
-    _FB_FORMAT = 'rgb565'
+_FB_FORMAT_OVERRIDE = os.environ.get('VELXIO_STM32_FB_FORMAT', '').lower()
+if _FB_FORMAT_OVERRIDE and _FB_FORMAT_OVERRIDE not in _FB_FORMAT_BPP:
+    _FB_FORMAT_OVERRIDE = ''
+
+_LTDC_PFCR_FORMAT = {
+    0b000: 'argb8888',
+    0b001: 'rgb888',
+    0b010: 'rgb565',
+    0b011: 'argb1555',
+    0b100: 'argb4444',
+    0b101: 'l8',
+    0b110: 'al44',
+    0b111: 'al88',
+}
 
 # Polling cadence for the LTDC framebuffer (env-overridable)
 _FB_POLL_MS = int(os.environ.get('VELXIO_STM32_FB_POLL_MS', '300'))
+_FB_BINARY_TRANSPORT = os.environ.get('VELXIO_STM32_FB_BINARY', '1') not in ('0', 'false', 'False')
+# Optional preview scaler for Renode's slow text monitor transport. A full
+# 1024x600 RGB565 read is 1.2 MB raw and much larger as monitor text; by
+# default we sample down to at most 512 logical pixels wide only when using the
+# monitor fallback. The binary socket can carry full-res frames fast enough, and
+# full-res avoids aliasing LVGL's text glyphs.
+_FB_MAX_WIDTH = int(os.environ.get(
+    'VELXIO_STM32_FB_MAX_WIDTH',
+    '0' if _FB_BINARY_TRANSPORT else '512',
+))
 # Hard cap on framebuffer size we'll attempt to read (safety against bogus
 # register values pointing to a huge memcpy). 1024 × 600 × 4 = 2,457,600.
 _FB_MAX_BYTES = 4 * 1024 * 1024
@@ -182,6 +204,8 @@ machine LoadPlatformDescription @{repl}
 logLevel 3
 logLevel -1 sysbus.usart1
 
+{fb_server_boot}
+
 emulation CreateServerSocketTerminal {uart_port} "uart1term" false
 connector Connect sysbus.usart1 uart1term
 
@@ -213,14 +237,25 @@ class RenodeInstance:
         self.firmware_path:  str = DEFAULT_FW
         self.uart_port:      int = 0
         self.monitor_port:   int = 0
+        self.fb_port:        int = 0
         self.pty_path:       str | None = None
         self.pty_master_fd:  int | None = None
         self.pty_slave_fd:   int | None = None
         self._serial_writer: asyncio.StreamWriter | None = None
         self._mon_reader:    asyncio.StreamReader | None = None
         self._mon_writer:    asyncio.StreamWriter | None = None
+        self._fb_reader:     asyncio.StreamReader | None = None
+        self._fb_writer:     asyncio.StreamWriter | None = None
+        self._fb_io_lock:    asyncio.Lock = asyncio.Lock()
+        self._touch_reader:  asyncio.StreamReader | None = None
+        self._touch_writer:  asyncio.StreamWriter | None = None
+        self._touch_io_lock: asyncio.Lock = asyncio.Lock()
+        self._fb_binary_ok:  bool = False
+        self._fb_binary_warned: bool = False
         self._mon_lock:      asyncio.Lock = asyncio.Lock()
         self._fb_last_hash:  int = 0
+        self._fb_geometry_key: tuple[int, int, int, int, str, int] | None = None
+        self._fb_rows: list[bytes] = []
         # Per-port last-seen ODR value, keyed by port letter ('A'/'B'/...).
         # Used by the GPIO poller to emit only on-edge transitions.
         self._gpio_last:     dict[str, int] = {}
@@ -315,9 +350,10 @@ class RenodeManager:
             return
         inst._touch_last = cur
         inst._touch_seq = (inst._touch_seq + 1) & 0xFFFFFFFF
-        # Four sequential WriteDoubleWord commands. Each round-trip is
-        # ~5–10 ms locally; under the GPIO poll load this adds ~30–40 ms
-        # per touch event, which is well below the 50 ms LVGL indev tick.
+        # Four sequential writes. The framebuffer binary socket supports a
+        # raw WriteDoubleWord path, avoiding monitor-lock contention from
+        # GPIO/register polling; if it is unavailable we fall back to the
+        # Renode monitor command.
         #
         # Order matters: the LVGL indev callback in the user's MP demo
         # reads the mailbox non-atomically, so it can observe writes mid-
@@ -333,6 +369,8 @@ class RenodeManager:
             (0x0C, inst._touch_seq),
             (0x00, 1 if pressed else 0),
         ):
+            if await self._write_doubleword_binary(inst, TOUCH_MAILBOX + off, val):
+                continue
             await self._monitor_cmd(
                 inst,
                 f'sysbus WriteDoubleWord {TOUCH_MAILBOX + off:#x} {val:#x}',
@@ -354,6 +392,7 @@ class RenodeManager:
 
         inst.uart_port    = _find_free_port()
         inst.monitor_port = _find_free_port()
+        inst.fb_port      = _find_free_port()
 
         # Render .resc to tempfile
         mach_id = inst.client_id.replace('-', '_')[:16]
@@ -363,6 +402,13 @@ class RenodeManager:
             firmware=inst.firmware_path,
             repl=REPL_PATH,
             uart_port=inst.uart_port,
+            fb_port=inst.fb_port,
+            fb_server_boot=(
+                f'python "VELXIO_FB_PORT={inst.fb_port}"\n'
+                f'python "execfile(\'{FB_SERVER_PY}\')"'
+                if _FB_BINARY_TRANSPORT else
+                '# Velxio framebuffer binary server disabled'
+            ),
         )
         tmp = tempfile.NamedTemporaryFile(
             mode='w', suffix='.resc', prefix='velxio_renode_', delete=False)
@@ -620,6 +666,10 @@ class RenodeManager:
 
     async def _read_memory(self, inst: RenodeInstance,
                            addr: int, count: int) -> bytes:
+        binary = await self._read_memory_binary(inst, addr, count)
+        if binary is not None:
+            return binary
+
         cmd = f'sysbus ReadBytes {addr:#x} {count}'
         # Renode's monitor returns ~6 chars per byte plus framing. A 1024×600
         # RGB565 framebuffer (~1.2 MB raw) requires ~10 MB over TCP, which can
@@ -630,6 +680,272 @@ class RenodeManager:
             inst, cmd, timeout=timeout, max_bytes=count * 8 + 4096)
         return _parse_readbytes_response(out, sent_cmd=cmd)
 
+    async def _connect_binary_stream(self, inst: RenodeInstance,
+                                     kind: str) -> bool:
+        if kind == 'touch':
+            reader_attr = '_touch_reader'
+            writer_attr = '_touch_writer'
+        else:
+            reader_attr = '_fb_reader'
+            writer_attr = '_fb_writer'
+
+        writer = getattr(inst, writer_attr)
+        if writer and not writer.is_closing():
+            return True
+        if inst._fb_binary_warned:
+            return False
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection('127.0.0.1', inst.fb_port),
+                timeout=0.5,
+            )
+            setattr(inst, reader_attr, reader)
+            setattr(inst, writer_attr, writer)
+            inst._fb_binary_ok = True
+            logger.info('%s: %s binary socket connected on port %d',
+                        inst.client_id, kind, inst.fb_port)
+            return True
+        except Exception as e:
+            inst._fb_binary_warned = True
+            logger.warning('%s: %s binary socket unavailable on port %d; '
+                           'falling back to Renode monitor (%s)',
+                           inst.client_id, kind, inst.fb_port, e)
+            return False
+
+    async def _connect_fb_binary(self, inst: RenodeInstance) -> bool:
+        return await self._connect_binary_stream(inst, 'framebuffer')
+
+    async def _read_memory_binary(self, inst: RenodeInstance,
+                                  addr: int, count: int) -> bytes | None:
+        if count <= 0:
+            return b''
+        if count > _FB_MAX_BYTES:
+            return None
+        if not await self._connect_fb_binary(inst):
+            return None
+        assert inst._fb_reader is not None
+        assert inst._fb_writer is not None
+        try:
+            async with inst._fb_io_lock:
+                inst._fb_writer.write(
+                    b'VXFB' + struct.pack('<II', addr & 0xFFFFFFFF, count)
+                )
+                await inst._fb_writer.drain()
+                header = await asyncio.wait_for(
+                    inst._fb_reader.readexactly(8), timeout=5.0)
+                if header[:4] != b'VXFR':
+                    raise ValueError(f'bad framebuffer binary response {header[:4]!r}')
+                status = struct.unpack('<I', header[4:])[0]
+                if status != 0:
+                    raise ValueError(f'framebuffer binary read failed status={status}')
+                return await asyncio.wait_for(
+                    inst._fb_reader.readexactly(count),
+                    timeout=max(5.0, count / 5_000_000),
+                )
+        except Exception as e:
+            logger.warning('%s: framebuffer binary read failed; falling back '
+                           'to Renode monitor (%s)', inst.client_id, e)
+            try:
+                inst._fb_writer.close()
+                await inst._fb_writer.wait_closed()
+            except Exception:
+                pass
+            inst._fb_reader = None
+            inst._fb_writer = None
+            inst._fb_binary_warned = True
+            return None
+
+    async def _write_doubleword_binary(self, inst: RenodeInstance,
+                                       addr: int, value: int) -> bool:
+        if not await self._connect_binary_stream(inst, 'touch'):
+            return False
+        assert inst._touch_reader is not None
+        assert inst._touch_writer is not None
+        try:
+            async with inst._touch_io_lock:
+                inst._touch_writer.write(
+                    b'VXDW' + struct.pack(
+                        '<II', addr & 0xFFFFFFFF, value & 0xFFFFFFFF)
+                )
+                await inst._touch_writer.drain()
+                header = await asyncio.wait_for(
+                    inst._touch_reader.readexactly(8), timeout=1.0)
+                if header[:4] != b'VXFR':
+                    raise ValueError(f'bad framebuffer binary response {header[:4]!r}')
+                status = struct.unpack('<I', header[4:])[0]
+                if status != 0:
+                    raise ValueError(f'framebuffer binary write failed status={status}')
+                return True
+        except Exception as e:
+            logger.warning('%s: framebuffer binary write failed; falling back '
+                           'to Renode monitor (%s)', inst.client_id, e)
+            try:
+                inst._touch_writer.close()
+                await inst._touch_writer.wait_closed()
+            except Exception:
+                pass
+            inst._touch_reader = None
+            inst._touch_writer = None
+            inst._fb_binary_warned = True
+            return False
+
+    async def _read_framebuffer(self, inst: RenodeInstance,
+                                addr: int, width: int, height: int,
+                                pitch: int, bpp: int) -> tuple[bytes, int, int, int, int]:
+        """Read a framebuffer, optionally decimated for the browser preview.
+
+        Full-frame ReadBytes is the worst case for Renode's monitor: a single
+        huge command monopolises the monitor lock for many seconds. Scaled mode
+        reads one visible source row at a time and samples columns in Python,
+        so touch/GPIO commands can be serviced between row reads. The emitted
+        metadata keeps the original logical size available for touch mapping.
+        """
+        if _FB_MAX_WIDTH <= 0 or width <= _FB_MAX_WIDTH:
+            total = pitch * height
+            return await self._read_memory(inst, addr, total), width, height, pitch, 1
+
+        step = max(1, (width + _FB_MAX_WIDTH - 1) // _FB_MAX_WIDTH)
+        scaled_width = (width + step - 1) // step
+        scaled_height = (height + step - 1) // step
+        scaled_pitch = scaled_width * bpp
+        visible_row_bytes = width * bpp
+        out = bytearray(scaled_pitch * scaled_height)
+
+        dst_row = 0
+        for src_y in range(0, height, step):
+            row = await self._read_memory(
+                inst, addr + src_y * pitch, visible_row_bytes)
+            if len(row) < visible_row_bytes:
+                return b'', scaled_width, scaled_height, scaled_pitch, step
+            dst = dst_row * scaled_pitch
+            for dst_x, src_x in enumerate(range(0, width, step)):
+                src = src_x * bpp
+                out[dst + dst_x * bpp:dst + (dst_x + 1) * bpp] = row[src:src + bpp]
+            dst_row += 1
+
+        return bytes(out), scaled_width, scaled_height, scaled_pitch, step
+
+    async def _poll_scaled_framebuffer(self, inst: RenodeInstance,
+                                       addr: int, width: int, height: int,
+                                       pitch: int, bpp: int, fmt: str) -> bool:
+        """Poll a scaled framebuffer and emit row patches as soon as they change."""
+        if _FB_MAX_WIDTH <= 0 or width <= _FB_MAX_WIDTH:
+            return False
+
+        step = max(1, (width + _FB_MAX_WIDTH - 1) // _FB_MAX_WIDTH)
+        scaled_width = (width + step - 1) // step
+        scaled_height = (height + step - 1) // step
+        scaled_pitch = scaled_width * bpp
+        visible_row_bytes = width * bpp
+        geometry_key = (width, height, pitch, bpp, fmt, step)
+        need_full = (
+            inst._fb_geometry_key != geometry_key or
+            len(inst._fb_rows) != scaled_height
+        )
+        if need_full:
+            inst._fb_geometry_key = geometry_key
+            inst._fb_rows = [b''] * scaled_height
+            inst._fb_last_hash = 0
+
+        changed_rows: list[tuple[int, bytes]] = []
+        for dst_row, src_y in enumerate(range(0, height, step)):
+            row = await self._read_memory(
+                inst, addr + src_y * pitch, visible_row_bytes)
+            if len(row) < visible_row_bytes:
+                return True
+
+            sampled = bytearray(scaled_pitch)
+            for dst_x, src_x in enumerate(range(0, width, step)):
+                src = src_x * bpp
+                sampled[dst_x * bpp:(dst_x + 1) * bpp] = row[src:src + bpp]
+            sampled_b = bytes(sampled)
+
+            if need_full:
+                inst._fb_rows[dst_row] = sampled_b
+                continue
+            if sampled_b == inst._fb_rows[dst_row]:
+                continue
+
+            inst._fb_rows[dst_row] = sampled_b
+            changed_rows.append((dst_row, sampled_b))
+
+        if need_full:
+            buf = b''.join(inst._fb_rows)
+            await inst.emit('framebuffer', {
+                'width':         scaled_width,
+                'height':        scaled_height,
+                'pitch':         scaled_pitch,
+                'source_width':  width,
+                'source_height': height,
+                'source_pitch':  pitch,
+                'scale':         step,
+                'format':        fmt,
+                'bytes_b64': base64.b64encode(buf).decode('ascii'),
+            })
+            return True
+
+        if not changed_rows:
+            return True
+
+        # Emit patches only after the full scaled scan completes. Grouping
+        # contiguous rows avoids mixed old/new scanline artifacts in the
+        # canvas while keeping payloads small.
+        if len(changed_rows) > scaled_height // 2:
+            buf = b''.join(inst._fb_rows)
+            await inst.emit('framebuffer', {
+                'width':         scaled_width,
+                'height':        scaled_height,
+                'pitch':         scaled_pitch,
+                'source_width':  width,
+                'source_height': height,
+                'source_pitch':  pitch,
+                'scale':         step,
+                'format':        fmt,
+                'bytes_b64': base64.b64encode(buf).decode('ascii'),
+            })
+            return True
+
+        run_y = changed_rows[0][0]
+        run_rows = [changed_rows[0][1]]
+        prev_y = run_y
+        for row_y, row_bytes in changed_rows[1:]:
+            if row_y == prev_y + 1:
+                run_rows.append(row_bytes)
+                prev_y = row_y
+                continue
+            await self._emit_framebuffer_patch(
+                inst, run_y, run_rows, scaled_width, scaled_pitch,
+                width, height, pitch, step, fmt)
+            run_y = row_y
+            prev_y = row_y
+            run_rows = [row_bytes]
+        await self._emit_framebuffer_patch(
+            inst, run_y, run_rows, scaled_width, scaled_pitch,
+            width, height, pitch, step, fmt)
+
+        return True
+
+    async def _emit_framebuffer_patch(self, inst: RenodeInstance,
+                                      y: int, rows: list[bytes],
+                                      scaled_width: int, scaled_pitch: int,
+                                      source_width: int, source_height: int,
+                                      source_pitch: int, scale: int,
+                                      fmt: str | None = None) -> None:
+        fmt = fmt or 'rgb565'
+        await inst.emit('framebuffer_patch', {
+            'x':             0,
+            'y':             y,
+            'width':         scaled_width,
+            'height':        len(rows),
+            'pitch':         scaled_pitch,
+            'source_width':  source_width,
+            'source_height': source_height,
+            'source_pitch':  source_pitch,
+            'scale':         scale,
+            'format':        fmt,
+            'bytes_b64': base64.b64encode(b''.join(rows)).decode('ascii'),
+        })
+
     async def _poll_framebuffer_loop(self, inst: RenodeInstance) -> None:
         """Poll LTDC every `_FB_POLL_MS` ms and emit framebuffer events.
 
@@ -637,7 +953,6 @@ class RenodeManager:
         geometry looks bogus. Suppresses duplicates via a fast hash check.
         """
         delay = max(0.05, _FB_POLL_MS / 1000.0)
-        bpp = _FB_FORMAT_BPP[_FB_FORMAT]
         while inst.running:
             try:
                 await asyncio.sleep(delay)
@@ -651,11 +966,15 @@ class RenodeManager:
                 fb_addr = await self._read_register(inst, LTDC_L1CFBAR)
                 cfblr   = await self._read_register(inst, LTDC_L1CFBLR)
                 cfblnr  = await self._read_register(inst, LTDC_L1CFBLNR)
-                if None in (fb_addr, cfblr, cfblnr) or fb_addr == 0:
+                pfcr    = await self._read_register(inst, LTDC_L1PFCR)
+                if None in (fb_addr, cfblr, cfblnr, pfcr) or fb_addr == 0:
                     continue
                 if not any(base <= fb_addr < base + 0x10000000
                            for base in _FB_VALID_BASES):
                     continue
+
+                fmt = _FB_FORMAT_OVERRIDE or _LTDC_PFCR_FORMAT.get(pfcr & 0x7, 'rgb565')
+                bpp = _FB_FORMAT_BPP[fmt]
 
                 pitch  = (cfblr >> 16) & 0x1FFF
                 height = cfblnr & 0x7FF
@@ -673,9 +992,16 @@ class RenodeManager:
                 total = pitch * height
                 if total == 0 or total > _FB_MAX_BYTES:
                     continue
+                if await self._poll_scaled_framebuffer(
+                    inst, fb_addr, width, height, pitch, bpp, fmt
+                ):
+                    continue
 
-                buf = await self._read_memory(inst, fb_addr, total)
-                if len(buf) < total:
+                buf, out_width, out_height, out_pitch, scale = (
+                    await self._read_framebuffer(
+                        inst, fb_addr, width, height, pitch, bpp)
+                )
+                if len(buf) < out_pitch * out_height:
                     continue
                 # Cheap dup-frame suppression.
                 h = hash(buf)
@@ -684,10 +1010,14 @@ class RenodeManager:
                 inst._fb_last_hash = h
 
                 await inst.emit('framebuffer', {
-                    'width':   width,
-                    'height':  height,
-                    'pitch':   pitch,
-                    'format':  _FB_FORMAT,
+                    'width':         out_width,
+                    'height':        out_height,
+                    'pitch':         out_pitch,
+                    'source_width':  width,
+                    'source_height': height,
+                    'source_pitch':  pitch,
+                    'scale':         scale,
+                    'format':        fmt,
                     'bytes_b64': base64.b64encode(buf).decode('ascii'),
                 })
             except asyncio.CancelledError:
@@ -781,6 +1111,24 @@ class RenodeManager:
                 pass
             inst._mon_writer = None
             inst._mon_reader = None
+
+        if inst._fb_writer:
+            try:
+                inst._fb_writer.close()
+                await inst._fb_writer.wait_closed()
+            except Exception:
+                pass
+            inst._fb_writer = None
+            inst._fb_reader = None
+
+        if inst._touch_writer:
+            try:
+                inst._touch_writer.close()
+                await inst._touch_writer.wait_closed()
+            except Exception:
+                pass
+            inst._touch_writer = None
+            inst._touch_reader = None
 
         if inst.pty_master_fd is not None:
             try:

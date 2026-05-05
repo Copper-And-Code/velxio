@@ -56,6 +56,11 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
             logger.debug('[%s] framebuffer %dx%d %s b64=%d',
                          client_id, data.get('width', 0), data.get('height', 0),
                          data.get('format', '?'), len(data.get('bytes_b64', '')))
+        elif event_type == 'framebuffer_patch':
+            logger.debug('[%s] framebuffer_patch x=%d y=%d %dx%d %s b64=%d',
+                         client_id, data.get('x', 0), data.get('y', 0),
+                         data.get('width', 0), data.get('height', 0),
+                         data.get('format', '?'), len(data.get('bytes_b64', '')))
         payload = json.dumps({'type': event_type, 'data': data})
         try:
             await manager.send(client_id, payload)

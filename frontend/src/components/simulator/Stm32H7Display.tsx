@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Stm32Framebuffer, Stm32PixelFormat } from '../../simulation/Stm32H7Bridge';
+import type {
+  Stm32Framebuffer,
+  Stm32FramebufferPatch,
+  Stm32PixelFormat,
+} from '../../simulation/Stm32H7Bridge';
 import { getStm32Bridge } from '../../store/useSimulatorStore';
 
 // ── Frame layout (CSS px, world coords) ──────────────────────────────────────
@@ -75,6 +79,7 @@ interface Stm32H7DisplayProps {
 export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const framebufferRef = useRef<Stm32Framebuffer | null>(null);
   const [framebuffer, setFramebuffer] = useState<Stm32Framebuffer | null>(null);
   // On-board LEDs (PB0 = red, PB1 = green) — wired in stm32h7_core_v13.repl
   // and lit by gpio_change events forwarded over the bridge. They give an
@@ -100,9 +105,16 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
     const bridge = getStm32Bridge(id);
     if (!bridge) return;
     const prevFb = bridge.onFramebuffer;
+    const prevPatch = bridge.onFramebufferPatch;
     bridge.onFramebuffer = (fb) => {
+      framebufferRef.current = fb;
       setFramebuffer(fb);
       prevFb?.(fb);
+    };
+    bridge.onFramebufferPatch = (patch) => {
+      framebufferRef.current = patch;
+      paintFramebufferPatch(canvasRef.current, patch);
+      prevPatch?.(patch);
     };
     const unsubGpio = bridge.addGpioListener((port, pin, value) => {
       if (port === 'B' && pin === 0) setLedRed(value);
@@ -111,6 +123,9 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
     return () => {
       if (bridge.onFramebuffer && bridge.onFramebuffer !== prevFb) {
         bridge.onFramebuffer = prevFb;
+      }
+      if (bridge.onFramebufferPatch && bridge.onFramebufferPatch !== prevPatch) {
+        bridge.onFramebufferPatch = prevPatch;
       }
       unsubGpio();
     };
@@ -193,7 +208,7 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
           // Enable pointer events on the screen alone — the parent has
           // pointerEvents: 'none' so the rest of the PCB silkscreen
           // doesn't intercept canvas drags. Touch is forwarded to the
-          // backend's mailbox at 0x60000000 (see Stm32H7Bridge.sendTouch).
+          // backend's mailbox at 0xC1F00000 (see Stm32H7Bridge.sendTouch).
           pointerEvents: 'auto',
           cursor: 'crosshair',
         }}
@@ -223,7 +238,7 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
           style={{
             width: '100%',
             height: '100%',
-            imageRendering: 'pixelated',
+            imageRendering: 'auto',
             display: 'block',
           }}
         />
@@ -314,8 +329,8 @@ function forwardTouch(
   framebuffer: Stm32Framebuffer | null,
   pressed: boolean,
 ): void {
-  const fbW = framebuffer?.width  ?? 1024;
-  const fbH = framebuffer?.height ?? 600;
+  const fbW = framebuffer?.sourceWidth  ?? framebuffer?.width  ?? 1024;
+  const fbH = framebuffer?.sourceHeight ?? framebuffer?.height ?? 600;
   const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
   let x = ((e.clientX - rect.left) / rect.width)  * fbW;
@@ -334,13 +349,28 @@ function forwardTouch(
   bridge?.sendTouch(x, y, pressed);
 }
 
+function paintFramebufferPatch(
+  canvas: HTMLCanvasElement | null,
+  patch: Stm32FramebufferPatch,
+): void {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const { x, y, width, height, pitch, format, bytes } = patch;
+  if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return;
+  if (canvas.width < x + width || canvas.height < y + height) return;
+  const rgba = decodeFramebufferToRGBA(bytes, width, height, pitch, format);
+  if (!rgba) return;
+  ctx.putImageData(new ImageData(rgba, width, height), x, y);
+}
+
 function decodeFramebufferToRGBA(
   src: Uint8Array,
   width: number,
   height: number,
   pitch: number,
   format: Stm32PixelFormat,
-): Uint8ClampedArray | null {
+): Uint8ClampedArray<ArrayBuffer> | null {
   const out = new Uint8ClampedArray(width * height * 4);
   switch (format) {
     case 'rgb565': {

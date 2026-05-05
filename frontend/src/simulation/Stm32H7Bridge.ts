@@ -16,7 +16,8 @@
  *     { type: 'serial_output',     data: { data: string } }
  *     { type: 'system',            data: { event: string } }
  *     { type: 'error',             data: { message: string } }
- *     { type: 'framebuffer',       data: { width, height, pitch, format, bytes_b64 } }
+ *     { type: 'framebuffer',       data: { width, height, pitch, source_width?, source_height?, format, bytes_b64 } }
+ *     { type: 'framebuffer_patch', data: { x, y, width, height, pitch, source_width?, source_height?, format, bytes_b64 } }
  *     { type: 'stm32_gpio_change', data: { port: 'A'..'H', pin: 0..15, value: bool } }
  *
  * GPIO direction is one-shot per pin: outputs are observed by polling each
@@ -39,8 +40,17 @@ export interface Stm32Framebuffer {
   width: number;
   height: number;
   pitch: number;        // bytes per source line (may include padding)
+  sourceWidth: number;  // real LTDC width; differs when backend sends a scaled preview
+  sourceHeight: number; // real LTDC height; used for touch coordinate mapping
+  sourcePitch?: number;
+  scale?: number;
   format: Stm32PixelFormat;
   bytes: Uint8Array;    // raw, in `format`, length === pitch * height
+}
+
+export interface Stm32FramebufferPatch extends Stm32Framebuffer {
+  x: number;
+  y: number;
 }
 
 const API_BASE = (): string =>
@@ -55,6 +65,7 @@ export class Stm32H7Bridge {
   onError: ((msg: string) => void) | null = null;
   onSystemEvent: ((event: string, data: Record<string, unknown>) => void) | null = null;
   onFramebuffer: ((fb: Stm32Framebuffer) => void) | null = null;
+  onFramebufferPatch: ((patch: Stm32FramebufferPatch) => void) | null = null;
 
   // GPIO subscribers as a Set so multiple consumers (the store's PinManager
   // forwarder + Stm32H7Display's on-board LED mirror) can listen without
@@ -230,6 +241,49 @@ export class Stm32H7Bridge {
             width:  Number(msg.data.width)  | 0,
             height: Number(msg.data.height) | 0,
             pitch:  Number(msg.data.pitch)  | 0,
+            sourceWidth:
+              Number(msg.data.source_width ?? msg.data.width) | 0,
+            sourceHeight:
+              Number(msg.data.source_height ?? msg.data.height) | 0,
+            sourcePitch:
+              msg.data.source_pitch === undefined
+                ? undefined
+                : Number(msg.data.source_pitch) | 0,
+            scale:
+              msg.data.scale === undefined ? undefined : Number(msg.data.scale) | 0,
+            format: (msg.data.format as Stm32PixelFormat) ?? 'rgb565',
+            bytes,
+          });
+          break;
+        }
+        case 'framebuffer_patch': {
+          if (!this.onFramebufferPatch) break;
+          const b64 = (msg.data.bytes_b64 as string) ?? '';
+          if (!b64) break;
+          let bytes: Uint8Array;
+          try {
+            const bin = atob(b64);
+            bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          } catch {
+            break;
+          }
+          this.onFramebufferPatch({
+            x:      Number(msg.data.x)      | 0,
+            y:      Number(msg.data.y)      | 0,
+            width:  Number(msg.data.width)  | 0,
+            height: Number(msg.data.height) | 0,
+            pitch:  Number(msg.data.pitch)  | 0,
+            sourceWidth:
+              Number(msg.data.source_width ?? msg.data.width) | 0,
+            sourceHeight:
+              Number(msg.data.source_height ?? msg.data.height) | 0,
+            sourcePitch:
+              msg.data.source_pitch === undefined
+                ? undefined
+                : Number(msg.data.source_pitch) | 0,
+            scale:
+              msg.data.scale === undefined ? undefined : Number(msg.data.scale) | 0,
             format: (msg.data.format as Stm32PixelFormat) ?? 'rgb565',
             bytes,
           });
@@ -271,7 +325,7 @@ export class Stm32H7Bridge {
    * Inject a touch event into the LTDC display.
    *
    * The backend writes (x, y, pressed) into a 16-byte "touch mailbox" at
-   * `0x60000000` (sramBank1 — unused by V13 firmware). A custom LVGL
+   * `0xC1F00000` (near the top of SDRAM). A custom LVGL
    * indev driver in the user's MicroPython demo polls that mailbox via
    * `stm.mem32[]`. Coordinates are in display pixel space (0..1023, 0..599),
    * so the caller is responsible for scaling from CSS / canvas-local
