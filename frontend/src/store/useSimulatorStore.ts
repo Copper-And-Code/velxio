@@ -387,6 +387,7 @@ interface SimulatorState {
   loadMicroPythonProgram: (
     boardId: string,
     files: Array<{ name: string; content: string }>,
+    entrypointName?: string,
   ) => Promise<void>;
   setBoardLanguageMode: (boardId: string, mode: LanguageMode) => void;
   startBoard: (boardId: string) => void;
@@ -849,6 +850,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
     loadMicroPythonProgram: async (
       boardId: string,
       files: Array<{ name: string; content: string }>,
+      entrypointName?: string,
     ) => {
       const board = get().boards.find((b) => b.id === boardId);
       if (!board) return;
@@ -866,7 +868,10 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         esp32Bridge.loadFirmware(b64);
 
         // Queue code injection for after REPL boots
-        const mainFile = files.find((f) => f.name === 'main.py') ?? files[0];
+        const mainFile =
+          (entrypointName ? files.find((f) => f.name === entrypointName) : undefined) ??
+          files.find((f) => f.name === 'main.py') ??
+          files[0];
         if (mainFile) {
           esp32Bridge.setPendingMicroPythonCode(mainFile.content);
         }
@@ -878,7 +883,10 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         // connected (just rearm) or about to connect (queued for first boot).
         const stm32Bridge = getStm32Bridge(boardId);
         if (!stm32Bridge) return;
-        const mainFile = files.find((f) => f.name === 'main.py') ?? files[0];
+        const mainFile =
+          (entrypointName ? files.find((f) => f.name === entrypointName) : undefined) ??
+          files.find((f) => f.name === 'main.py') ??
+          files[0];
         if (mainFile) {
           stm32Bridge.setPendingMicroPythonCode(mainFile.content);
         }
@@ -886,7 +894,13 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         // RP2040 path: load firmware + filesystem in browser
         const sim = getBoardSimulator(boardId);
         if (!(sim instanceof RP2040Simulator)) return;
-        await sim.loadMicroPython(files);
+        const bootFiles =
+          entrypointName && entrypointName !== 'main.py'
+            ? files
+                .filter((f) => f.name !== 'main.py' || f.name === entrypointName)
+                .map((f) => (f.name === entrypointName ? { ...f, name: 'main.py' } : f))
+            : files;
+        await sim.loadMicroPython(bootFiles);
       }
 
       set((s) => {

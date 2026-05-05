@@ -5,6 +5,7 @@ export interface WorkspaceFile {
   name: string;
   content: string;
   modified: boolean;
+  localHandle?: unknown;
 }
 
 const MAIN_ID = 'main-sketch';
@@ -115,6 +116,8 @@ interface EditorState {
   setActiveFile: (id: string) => void;
   /** Load a full set of files (e.g. when loading a saved project) */
   loadFiles: (files: { name: string; content: string }[]) => void;
+  openLocalFile: (file: { name: string; content: string; handle: unknown }) => string;
+  setFileLocalHandle: (id: string, handle: unknown) => void;
 
   // File group management
   createFileGroup: (
@@ -302,6 +305,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         fileGroups: { ...s.fileGroups, [groupId]: files },
         activeGroupFileId: { ...s.activeGroupFileId, [groupId]: firstId },
         openGroupFileIds: { ...s.openGroupFileIds, [groupId]: [firstId] },
+      };
+    });
+  },
+
+  openLocalFile: ({ name, content, handle }) => {
+    const id = crypto.randomUUID();
+    const file: WorkspaceFile = { id, name, content, modified: false, localHandle: handle };
+    set((s) => {
+      const groupId = s.activeGroupId;
+      const groupFiles = [...(s.fileGroups[groupId] ?? []), file];
+      const groupOpenIds = s.openGroupFileIds[groupId] ?? [];
+      return {
+        files: [...s.files, file],
+        activeFileId: id,
+        openFileIds: s.openFileIds.includes(id) ? s.openFileIds : [...s.openFileIds, id],
+        fileGroups: { ...s.fileGroups, [groupId]: groupFiles },
+        activeGroupFileId: { ...s.activeGroupFileId, [groupId]: id },
+        openGroupFileIds: {
+          ...s.openGroupFileIds,
+          [groupId]: groupOpenIds.includes(id) ? groupOpenIds : [...groupOpenIds, id],
+        },
+      };
+    });
+    return id;
+  },
+
+  setFileLocalHandle: (id: string, handle: unknown) => {
+    set((s) => {
+      const groupId = s.activeGroupId;
+      const mapper = (f: WorkspaceFile) => (f.id === id ? { ...f, localHandle: handle } : f);
+      return {
+        files: s.files.map(mapper),
+        fileGroups: { ...s.fileGroups, [groupId]: (s.fileGroups[groupId] ?? []).map(mapper) },
       };
     });
   },

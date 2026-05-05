@@ -23,6 +23,69 @@ import {
 } from '../../utils/analytics';
 import './EditorToolbar.css';
 
+type FilePickerWritable = {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+};
+
+type LocalFileHandle = {
+  name: string;
+  getFile: () => Promise<File>;
+  createWritable: () => Promise<FilePickerWritable>;
+  queryPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+  requestPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+};
+
+type FilePickerWindow = Window & {
+  showOpenFilePicker?: (options?: {
+    multiple?: boolean;
+    excludeAcceptAllOption?: boolean;
+    types?: Array<{
+      description: string;
+      accept: Record<string, string[]>;
+    }>;
+  }) => Promise<LocalFileHandle[]>;
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string;
+    types?: Array<{
+      description: string;
+      accept: Record<string, string[]>;
+    }>;
+  }) => Promise<LocalFileHandle>;
+};
+
+const LOCAL_SOURCE_TYPES = [
+  {
+    description: 'Source files',
+    accept: {
+      'text/plain': ['.py', '.ino', '.c', '.cpp', '.h', '.hpp', '.txt', '.md', '.json'],
+    },
+  },
+];
+
+async function ensureLocalFilePermission(handle: LocalFileHandle, mode: 'read' | 'readwrite') {
+  if (handle.queryPermission && (await handle.queryPermission({ mode })) === 'granted') {
+    return true;
+  }
+  if (handle.requestPermission) {
+    return (await handle.requestPermission({ mode })) === 'granted';
+  }
+  return true;
+}
+
+function getMicroPythonRunFiles(groupId: string) {
+  const editor = useEditorStore.getState();
+  const groupFiles = editor.getGroupFiles(groupId);
+  const activeGroupFileId = editor.activeGroupFileId[groupId];
+  const activeFile =
+    groupFiles.find((f) => f.id === activeGroupFileId) ??
+    groupFiles.find((f) => f.id === editor.activeFileId);
+  return {
+    files: groupFiles.map((f) => ({ name: f.name, content: f.content })),
+    entrypointName: activeFile?.name,
+  };
+}
+
 interface EditorToolbarProps {
   consoleOpen: boolean;
   setConsoleOpen: (open: boolean | ((v: boolean) => boolean)) => void;
@@ -60,7 +123,7 @@ export const EditorToolbar = ({
   compileLogs: _compileLogs,
   setCompileLogs,
 }: EditorToolbarProps) => {
-  const { files, codeChangedSinceLastCompile, markCompiled } = useEditorStore();
+  const { files, activeFileId, codeChangedSinceLastCompile, markCompiled } = useEditorStore();
   const {
     boards,
     activeBoardId,
@@ -80,6 +143,7 @@ export const EditorToolbar = ({
   } = useSimulatorStore();
 
   const activeBoard = boards.find((b) => b.id === activeBoardId) ?? boards[0];
+  const activeFile = files.find((f) => f.id === activeFileId);
   const currentProject = useProjectStore((s) => s.currentProject);
 
   // Helper: report a Run event to the backend for analytics. Resolves the
@@ -161,13 +225,14 @@ export const EditorToolbar = ({
         message: 'MicroPython: loading firmware and user files...',
       });
       try {
-        const groupFiles = useEditorStore.getState().getGroupFiles(activeBoard.activeFileGroupId);
-        const pyFiles = groupFiles.map((f) => ({ name: f.name, content: f.content }));
-        await loadMicroPythonProgram(activeBoardId, pyFiles);
+        const { files: pyFiles, entrypointName } = getMicroPythonRunFiles(
+          activeBoard.activeFileGroupId,
+        );
+        await loadMicroPythonProgram(activeBoardId, pyFiles, entrypointName);
         addLog({
           timestamp: new Date(),
           type: 'success',
-          message: 'MicroPython firmware loaded successfully',
+          message: `MicroPython firmware loaded${entrypointName ? `: ${entrypointName}` : ''}`,
         });
         setMessage({ type: 'success', text: 'MicroPython ready' });
       } catch (err) {
@@ -267,13 +332,14 @@ export const EditorToolbar = ({
           message: 'MicroPython: loading firmware and user files...',
         });
         try {
-          const groupFiles = useEditorStore.getState().getGroupFiles(board.activeFileGroupId);
-          const pyFiles = groupFiles.map((f) => ({ name: f.name, content: f.content }));
-          await loadMicroPythonProgram(activeBoardId, pyFiles);
+          const { files: pyFiles, entrypointName } = getMicroPythonRunFiles(
+            board.activeFileGroupId,
+          );
+          await loadMicroPythonProgram(activeBoardId, pyFiles, entrypointName);
           addLog({
             timestamp: new Date(),
             type: 'success',
-            message: 'MicroPython firmware loaded',
+            message: `MicroPython firmware loaded${entrypointName ? `: ${entrypointName}` : ''}`,
           });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : 'Failed to load MicroPython';
@@ -468,7 +534,7 @@ export const EditorToolbar = ({
       const projectName =
         files.find((f) => f.name.endsWith('.ino'))?.name.replace('.ino', '') || 'velxio-project';
       await exportToWokwiZip(files, components, wires, legacyBoardType, projectName, boardPosition);
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: 'Export failed.' });
     }
   };
@@ -535,8 +601,84 @@ export const EditorToolbar = ({
         setPendingLibraries(result.libraries);
         setInstallModalOpen(true);
       }
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err?.message || 'Import failed.' });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Import failed.';
+      setMessage({ type: 'error', text: errMsg });
+    }
+  };
+
+  const handleOpenLocalFile = async () => {
+    const picker = window as FilePickerWindow;
+    if (!picker.showOpenFilePicker) {
+      setMessage({ type: 'error', text: 'Local file handles require Chrome or Edge.' });
+      return;
+    }
+
+    try {
+      const [handle] = await picker.showOpenFilePicker({
+        multiple: false,
+        excludeAcceptAllOption: false,
+        types: LOCAL_SOURCE_TYPES,
+      });
+      if (!handle) return;
+
+      const file = await handle.getFile();
+      const content = await file.text();
+      useEditorStore.getState().openLocalFile({ name: file.name, content, handle });
+      setMessage({ type: 'success', text: `Opened local file: ${file.name}` });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      const errMsg = err instanceof Error ? err.message : 'Open local file failed.';
+      setMessage({ type: 'error', text: errMsg });
+    }
+  };
+
+  const handleSaveLocalFile = async () => {
+    const picker = window as FilePickerWindow;
+    const store = useEditorStore.getState();
+    const file = store.files.find((f) => f.id === store.activeFileId);
+    if (!file) {
+      setMessage({ type: 'error', text: 'No active file to save.' });
+      return;
+    }
+
+    let handle = file.localHandle as LocalFileHandle | undefined;
+    if (!handle) {
+      if (!picker.showSaveFilePicker) {
+        setMessage({ type: 'error', text: 'Save to local file requires Chrome or Edge.' });
+        return;
+      }
+      try {
+        handle = await picker.showSaveFilePicker({
+          suggestedName: file.name,
+          types: LOCAL_SOURCE_TYPES,
+        });
+        store.setFileLocalHandle(file.id, handle);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        const errMsg = err instanceof Error ? err.message : 'Choose local file failed.';
+        setMessage({ type: 'error', text: errMsg });
+        return;
+      }
+    }
+
+    try {
+      if (!(await ensureLocalFilePermission(handle, 'readwrite'))) {
+        setMessage({ type: 'error', text: 'Permission denied for local file.' });
+        return;
+      }
+
+      const writable = await handle.createWritable();
+      await writable.write(file.content);
+      await writable.close();
+      if (handle.name && handle.name !== file.name) {
+        store.renameFile(file.id, handle.name);
+      }
+      store.markFileSaved(file.id);
+      setMessage({ type: 'success', text: `Saved local file: ${handle.name || file.name}` });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Save local file failed.';
+      setMessage({ type: 'error', text: errMsg });
     }
   };
 
@@ -799,6 +941,60 @@ export const EditorToolbar = ({
 
               {overflowOpen && (
                 <div className="tb-overflow-menu">
+                  <button
+                    className="tb-overflow-item"
+                    onClick={() => {
+                      handleOpenLocalFile();
+                      setOverflowOpen(false);
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <path d="M12 18v-6" />
+                      <path d="m9 15 3 3 3-3" />
+                    </svg>
+                    Open local file
+                  </button>
+                  <button
+                    className="tb-overflow-item"
+                    onClick={() => {
+                      handleSaveLocalFile();
+                      setOverflowOpen(false);
+                    }}
+                    disabled={!activeFile}
+                    title={
+                      activeFile?.localHandle
+                        ? 'Save changes to the opened local file'
+                        : 'Choose a local path and save this file'
+                    }
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                      <polyline points="17 21 17 13 7 13 7 21" />
+                      <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save local file
+                  </button>
+                  <div style={{ borderTop: '1px solid #3c3c3c', margin: '4px 0' }} />
                   <button
                     className="tb-overflow-item"
                     onClick={() => {

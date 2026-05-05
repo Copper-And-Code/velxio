@@ -11,7 +11,7 @@ delivery vedi il tag git `claude/phase1-stm32h7`.
 
 ## 1. Prompt originale (Nunzio → Claude)
 
-> ho fatto io, quello che vorrei che tu facessi su questo repo è studiare la
+> quello che vorrei che tu facessi su questo repo è studiare la
 > fattibilita' di aggiungere una nuova architettura basata su stm32H743 con
 > 32Mbyte di sdram esterna su FMC e con LCD RGB 888 su LTDC e un display
 > RGB 1024x600 come componente, oltre la seriale, micropython etc.

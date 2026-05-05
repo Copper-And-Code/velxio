@@ -84,7 +84,7 @@ sld = lv.slider(scr)
 sld.set_size(700, 36)
 sld.align(lv.ALIGN.BOTTOM_MID, 0, -90)
 sld.set_range(0, 100)
-sld.set_value(40, lv.ANIM.OFF)
+#sld.set_value(40, lv.ANIM.OFF)
 
 sld_lbl = lv.label(scr)
 sld_lbl.set_text('Slider: 40')

@@ -107,7 +107,19 @@ export class Stm32H7Bridge {
   // only way to get user code running short of rebuilding the firmware.
   private _pendingMicroPythonCode: string | null = null;
   private _serialBuffer = '';
-  private _replState: 'idle' | 'banner_seen' | 'prompt_seen' | 'raw_repl_entered' = 'idle';
+  private _replState:
+    | 'idle'
+    | 'banner_seen'
+    | 'prompt_seen'
+    | 'raw_repl_entered'
+    | 'raw_paste_starting'
+    | 'raw_paste_sending' = 'idle';
+  private _rawPasteBytes: number[] = [];
+  private _rawPasteOffset = 0;
+  private _rawPasteWindow = 0;
+  private _rawPasteWindowSize = 0;
+  private _rawPasteEofSent = false;
+  private _rawPasteFallbackCode = '';
 
   constructor(boardId: string, firmwarePath: string | null = null) {
     this.boardId = boardId;
@@ -128,6 +140,7 @@ export class Stm32H7Bridge {
     this._pendingMicroPythonCode = code;
     this._serialBuffer = '';
     this._replState = 'idle';
+    this._rawPasteFallbackCode = '';
   }
 
   connect(): void {
@@ -200,7 +213,31 @@ export class Stm32H7Bridge {
               const code = this._pendingMicroPythonCode!;
               this._pendingMicroPythonCode = null;
               this._serialBuffer = '';
-              setTimeout(() => this._sendCodeInRawRepl(code), 200);
+              setTimeout(() => this._startRawPaste(code), 200);
+            }
+
+            if (this._replState === 'raw_paste_starting') {
+              const supportedAt = this._serialBuffer.indexOf('R\x01');
+              if (supportedAt >= 0 && this._serialBuffer.length >= supportedAt + 4) {
+                this._rawPasteWindow =
+                  this._serialBuffer.charCodeAt(supportedAt + 2) |
+                  (this._serialBuffer.charCodeAt(supportedAt + 3) << 8);
+                this._rawPasteWindowSize = this._rawPasteWindow || 128;
+                this._serialBuffer = '';
+                this._replState = 'raw_paste_sending';
+                this._pumpRawPaste();
+              } else if (this._serialBuffer.includes('R\x00')) {
+                this._serialBuffer = '';
+                this._sendCodeInRawReplFallback(this._rawPasteFallbackCode);
+              }
+            } else if (this._replState === 'raw_paste_sending') {
+              for (let i = 0; i < text.length; i++) {
+                const byte = text.charCodeAt(i) & 0xff;
+                if (byte === 0x01) {
+                  this._rawPasteWindow += this._rawPasteWindowSize;
+                  this._pumpRawPaste();
+                }
+              }
             }
 
             // Bound the buffer in case something never matches.
@@ -371,17 +408,54 @@ export class Stm32H7Bridge {
   }
 
   /**
-   * Push the user code through raw REPL. The Renode UART has no FIFO
-   * back-pressure problem (it's a software TCP socket), but we still chunk
-   * + space the writes so the lv_micropython tokenizer/parser can keep up
-   * on a 480 MHz emulated H7 — Renode runs roughly 10× slower than wall
-   * clock here, and a 50 KB script in one shot can starve the REPL task.
+   * Enter MicroPython raw-paste mode. Unlike plain raw REPL, this is
+   * flow-controlled by the firmware using a small receive window, so large
+   * scripts keep their indentation and line boundaries intact.
    */
-  private _sendCodeInRawRepl(code: string): void {
+  private _startRawPaste(code: string): void {
+    const sanitized = Stm32H7Bridge._sanitizeForRepl(code);
+    this._rawPasteBytes = Array.from(new TextEncoder().encode(sanitized));
+    this._rawPasteOffset = 0;
+    this._rawPasteWindow = 0;
+    this._rawPasteWindowSize = 0;
+    this._rawPasteEofSent = false;
+    this._rawPasteFallbackCode = sanitized;
+    this._serialBuffer = '';
+    this._replState = 'raw_paste_starting';
+    this.sendSerialBytes([0x05, 0x41, 0x01]);
+  }
+
+  private _pumpRawPaste(): void {
+    if (this._replState !== 'raw_paste_sending') return;
+
+    while (this._rawPasteWindow > 0 && this._rawPasteOffset < this._rawPasteBytes.length) {
+      const count = Math.min(
+        this._rawPasteWindow,
+        512,
+        this._rawPasteBytes.length - this._rawPasteOffset,
+      );
+      this.sendSerialBytes(
+        this._rawPasteBytes.slice(this._rawPasteOffset, this._rawPasteOffset + count),
+      );
+      this._rawPasteOffset += count;
+      this._rawPasteWindow -= count;
+    }
+
+    if (this._rawPasteOffset >= this._rawPasteBytes.length && !this._rawPasteEofSent) {
+      this._rawPasteEofSent = true;
+      this.sendSerialBytes([0x04]);
+      this._replState = 'idle';
+    }
+  }
+
+  /**
+   * Fallback for MicroPython builds without raw-paste support.
+   */
+  private _sendCodeInRawReplFallback(code: string): void {
     const sanitized = Stm32H7Bridge._sanitizeForRepl(code);
     const codeBytes = Array.from(new TextEncoder().encode(sanitized));
-    const CHUNK_SIZE = 128;
-    const CHUNK_DELAY_MS = 60;
+    const CHUNK_SIZE = 16;
+    const CHUNK_DELAY_MS = 80;
     let offset = 0;
 
     const sendChunk = () => {

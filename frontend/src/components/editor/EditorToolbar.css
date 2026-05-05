@@ -354,6 +354,16 @@
   color: #fff;
 }
 
+.tb-overflow-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tb-overflow-item:disabled:hover {
+  background: transparent;
+  color: #ccc;
+}
+
 .tb-overflow-item svg {
   flex-shrink: 0;
   color: #00b8d4;
