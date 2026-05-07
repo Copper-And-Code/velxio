@@ -26,6 +26,7 @@ import './EditorToolbar.css';
 type FilePickerWritable = {
   write: (data: string) => Promise<void>;
   close: () => Promise<void>;
+  abort?: () => Promise<void>;
 };
 
 type LocalFileHandle = {
@@ -73,6 +74,20 @@ async function ensureLocalFilePermission(handle: LocalFileHandle, mode: 'read' |
   return true;
 }
 
+async function writeLocalFile(handle: LocalFileHandle, content: string): Promise<void> {
+  const writable = await handle.createWritable();
+  let closed = false;
+  try {
+    await writable.write(content);
+    await writable.close();
+    closed = true;
+  } finally {
+    if (!closed && writable.abort) {
+      await writable.abort().catch(() => undefined);
+    }
+  }
+}
+
 function getMicroPythonRunFiles(groupId: string) {
   const editor = useEditorStore.getState();
   const groupFiles = editor.getGroupFiles(groupId);
@@ -93,7 +108,10 @@ interface EditorToolbarProps {
   setCompileLogs: (logs: CompilationLog[] | ((prev: CompilationLog[]) => CompilationLog[])) => void;
 }
 
-const BOARD_PILL_ICON: Record<BoardKind, string> = {
+const DEFAULT_BOARD_PILL_ICON = '▣';
+const DEFAULT_BOARD_PILL_COLOR = '#90caf9';
+
+const BOARD_PILL_ICON: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '⬤',
   'arduino-nano': '▪',
   'arduino-mega': '▬',
@@ -105,7 +123,7 @@ const BOARD_PILL_ICON: Record<BoardKind, string> = {
   'stm32-h7-core-v13': '▣',
 };
 
-const BOARD_PILL_COLOR: Record<BoardKind, string> = {
+const BOARD_PILL_COLOR: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '#4fc3f7',
   'arduino-nano': '#4fc3f7',
   'arduino-mega': '#4fc3f7',
@@ -144,6 +162,12 @@ export const EditorToolbar = ({
 
   const activeBoard = boards.find((b) => b.id === activeBoardId) ?? boards[0];
   const activeFile = files.find((f) => f.id === activeFileId);
+  const activeBoardPillIcon = activeBoard
+    ? (BOARD_PILL_ICON[activeBoard.boardKind] ?? DEFAULT_BOARD_PILL_ICON)
+    : DEFAULT_BOARD_PILL_ICON;
+  const activeBoardPillColor = activeBoard
+    ? (BOARD_PILL_COLOR[activeBoard.boardKind] ?? DEFAULT_BOARD_PILL_COLOR)
+    : DEFAULT_BOARD_PILL_COLOR;
   const currentProject = useProjectStore((s) => s.currentProject);
 
   // Helper: report a Run event to the backend for analytics. Resolves the
@@ -668,9 +692,7 @@ export const EditorToolbar = ({
         return;
       }
 
-      const writable = await handle.createWritable();
-      await writable.write(file.content);
-      await writable.close();
+      await writeLocalFile(handle, file.content);
       if (handle.name && handle.name !== file.name) {
         store.renameFile(file.id, handle.name);
       }
@@ -701,12 +723,12 @@ export const EditorToolbar = ({
               <div
                 className="tb-board-pill"
                 style={{
-                  borderColor: BOARD_PILL_COLOR[activeBoard.boardKind],
-                  color: BOARD_PILL_COLOR[activeBoard.boardKind],
+                  borderColor: activeBoardPillColor,
+                  color: activeBoardPillColor,
                 }}
                 title={`Editing: ${BOARD_KIND_LABELS[activeBoard.boardKind]}`}
               >
-                <span className="tb-board-pill-icon">{BOARD_PILL_ICON[activeBoard.boardKind]}</span>
+                <span className="tb-board-pill-icon">{activeBoardPillIcon}</span>
                 <span className="tb-board-pill-label">
                   {BOARD_KIND_LABELS[activeBoard.boardKind]}
                 </span>

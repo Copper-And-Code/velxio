@@ -180,6 +180,11 @@ for _ in range(60):
 | `VELXIO_RENODE_BIN`          | `renode`    | Path al binario Renode                         |
 | `VELXIO_RENODE_LOG`          | (off)       | Set per loggare anche stderr di Renode         |
 
+Il socket binario framebuffer/touch viene ritentato automaticamente dopo
+errori transitori. Un fallimento iniziale non disabilita piu' il path binario
+per tutta la sessione: il backend usa il monitor testuale come fallback e
+riprova il socket dopo un breve backoff.
+
 ---
 
 ## 5. Memory map STM32H7 LTDC (riferimento)
@@ -306,28 +311,26 @@ condividono lo stesso buffer → ogni cambio è immediatamente visibile.
 
 ### 8.5 Limiti noti di throughput
 
-Il poller framebuffer full-resolution legge **1.2 MB via Renode monitor TCP**
-(che serializza i byte come testo "0xNN, "). Sotto carico GPIO poll + touch
-write + Renode CPU emulation, un ciclo completo di poll può richiedere
-**5–60 secondi** anziché i 300 ms nominali → la canvas si aggiorna
-visibilmente in ritardo rispetto agli eventi handler che pure firano
-correttamente nel REPL.
+Il path preferito e' il socket binario Renode (`VELXIO_STM32_FB_BINARY=1`):
+un frame RGB565 full-resolution e' 1024 x 600 x 2 = 1.2 MB raw, letto con
+`machine.SystemBus.ReadBytes` e spedito al backend senza serializzazione
+testuale. In questa modalita' il default resta full-resolution
+(`VELXIO_STM32_FB_MAX_WIDTH=0`) per evitare artefatti sui font LVGL.
 
-Con `VELXIO_STM32_FB_BINARY=1`, il default è full-resolution
-(`VELXIO_STM32_FB_MAX_WIDTH=0`): il socket binario regge 1024×600 RGB565 e
-non degrada i font LVGL con campionamento orizzontale. Quando il socket
-binario è disabilitato, il default torna a `VELXIO_STM32_FB_MAX_WIDTH=512`:
-il framebuffer reale resta 1024×600 e le coordinate touch sono ancora in
-pixel reali, ma il trasporto verso il browser legge e spedisce una versione
-campionata per evitare il costo del monitor testuale.
+Il fallback via monitor TCP resta disponibile ma e' molto piu' lento:
+Renode serializza i byte come testo `0xNN,`, quindi 1.2 MB raw diventano
+diversi MB di risposta monitor. In fallback conviene lasciare
+`VELXIO_STM32_FB_MAX_WIDTH=512` o abbassarlo ancora.
 
 Quando `VELXIO_STM32_FB_BINARY=1`, Renode avvia anche un piccolo server TCP
 locale (`renode/extensions/velxio_framebuffer_server.py`) che legge
 `machine.SystemBus.ReadBytes` e restituisce byte raw con il protocollo
 `VXFB/VXFR`. Il backend usa quel socket per `_read_memory`; se non è
 disponibile o fallisce, torna automaticamente al monitor testuale.
-Lo stesso socket viene usato anche per le scritture touch `WriteDoubleWord`,
-serializzate con le letture framebuffer per non corrompere il protocollo.
+Lo stesso server espone anche `VXDW` per `WriteDoubleWord` touch. Il server
+serializza gli accessi a `sysbus` con un lock interno, cosi' letture
+framebuffer e scritture mailbox concorrenti non corrono una contro l'altra
+dentro Renode.
 
 Dopo il primo frame completo, il backend emette `framebuffer_patch` riga per
 riga solo quando il contenuto campionato cambia. Il canvas viene aggiornato
@@ -356,3 +359,38 @@ mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32
 
 Click sul canvas browser → bottone incrementa contatore, slider segue
 il drag.
+
+### 8.7 Esecuzione da editor Velxio
+
+Il toolbar dell'editor supporta il workflow locale via File System Access API
+su Chrome/Edge:
+
+1. Menu `...` → **Open local file**
+2. Seleziona `docs/examples/stm32h7_touch_demo.py` o
+   `docs/examples/advanced_demo.py`
+3. Verifica che il tab aperto sia quello attivo
+4. Premi **Run** sulla board STM32H7
+
+Per MicroPython, Velxio invia come entrypoint il file attivo nel workspace
+della board, non sempre `main.py`. Questo permette di aprire piu' esempi e
+scegliere cosa eseguire semplicemente cambiando tab.
+
+Il trasferimento del codice verso STM32H7 usa il protocollo **MicroPython
+raw-paste**:
+
+- attende banner REPL e prompt
+- entra in raw REPL con Ctrl-A
+- negozia raw-paste con Ctrl-E `A` Ctrl-A
+- rispetta la finestra di ricezione comunicata dal firmware
+- invia chunk fino a `512` byte, comunque limitati dal flow-control
+- chiude con Ctrl-D
+
+Questo e' piu' affidabile del vecchio invio "a tempo" nel raw REPL: script
+lunghi come `advanced_demo.py` mantengono indentazione e boundary di riga.
+Se il firmware non supporta raw-paste, il bridge torna al fallback lento a
+chunk piccoli.
+
+Il comando **Save local file** salva nello stesso handle locale quando il file
+e' stato aperto da disco. Se il file non ha ancora un handle locale, apre un
+picker "save as". In caso di errore durante la scrittura, il writer viene
+abortito per evitare file parziali.

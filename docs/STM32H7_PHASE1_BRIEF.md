@@ -76,6 +76,26 @@ Riferimento al tag annotato `claude/phase1-stm32h7` (commit
   a 5–60 s/frame sotto carico — mitigazioni candidate documentate in
   [`STM32H7_MANUAL_TEST.md` §8.5](STM32H7_MANUAL_TEST.md#85-limiti-noti-di-throughput).
 
+## 4.1 Stato dopo l'ottimizzazione LTDC/local workflow
+
+Il lavoro successivo a Phase 1 ha ridotto i limiti piu' visibili del primo
+porting:
+
+- framebuffer LTDC letto tramite server TCP binario Renode (`VXFB/VXFR`)
+  invece del monitor testuale quando disponibile
+- touch mailbox scritta tramite comando binario `VXDW`, con fallback monitor
+- accessi `sysbus` del server binario serializzati da lock interno
+- retry/backoff del socket binario dopo errori transitori
+- `framebuffer_patch` lato backend/frontend per aggiornare solo righe cambiate
+- pixel format LTDC rilevato da `L1PFCR` invece di assumere RGB565 fisso
+- editor Velxio capace di aprire/salvare file locali via File System Access API
+- Run MicroPython esegue il file attivo nel tab, non sempre `main.py`
+- injection STM32H7 via MicroPython raw-paste flow-controlled, stabile anche
+  con `docs/examples/advanced_demo.py`
+
+Il monitor testuale resta fallback di compatibilita'. Le note operative
+aggiornate stanno in [`STM32H7_MANUAL_TEST.md`](STM32H7_MANUAL_TEST.md).
+
 ## 5. Memorie progetto associate
 
 Le memorie persistenti di Claude relative a questo lavoro (visibili al solo

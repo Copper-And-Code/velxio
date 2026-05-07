@@ -406,6 +406,7 @@ interface SimulatorState {
     | RiscVSimulator
     | Esp32C3Simulator
     | Esp32BridgeShim
+    | Stm32BridgeShim
     | null;
   /** @deprecated use getBoardPinManager(activeBoardId) */
   pinManager: PinManager;
@@ -1212,7 +1213,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
         set((s) => ({
           boardType: type,
-          simulator: shim as any,
+          simulator: shim,
           compiledHex: null,
           serialOutput: '',
           serialBaudRate: 0,
@@ -1240,7 +1241,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
               );
               return { boards, serialBaudRate: baud };
             }),
-          getOscilloscopeCallback(),
+          getOscilloscopeCallback(boardId),
         );
         simulatorMap.set(boardId, sim);
 
@@ -1307,7 +1308,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         const shim = new Esp32BridgeShim(bridge, pm);
         shim.onSerialData = serialCallback;
         simulatorMap.set(boardId, shim);
-        set({ simulator: shim as any, serialOutput: '', serialBaudRate: 0 });
+        set({ simulator: shim, serialOutput: '', serialBaudRate: 0 });
       } else {
         const sim = createSimulator(
           boardType as BoardKind,
@@ -1320,7 +1321,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
               );
               return { boards, serialBaudRate: baud };
             }),
-          getOscilloscopeCallback(),
+          getOscilloscopeCallback(boardId),
         );
         simulatorMap.set(boardId, sim);
         set({ simulator: sim, serialOutput: '', serialBaudRate: 0 });
@@ -1518,7 +1519,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
     setWires: (wires) =>
       set({
         // Ensure every wire has waypoints (backwards-compatible with saved projects)
-        wires: wires.map((w) => ({ waypoints: [], ...w })),
+        wires: wires.map((w) => ({ ...w, waypoints: w.waypoints ?? [] })),
       }),
 
     startWireCreation: (endpoint, color) =>

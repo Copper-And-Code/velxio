@@ -251,7 +251,8 @@ class RenodeInstance:
         self._touch_writer:  asyncio.StreamWriter | None = None
         self._touch_io_lock: asyncio.Lock = asyncio.Lock()
         self._fb_binary_ok:  bool = False
-        self._fb_binary_warned: bool = False
+        self._binary_warned: dict[str, bool] = {}
+        self._binary_retry_after: dict[str, float] = {}
         self._mon_lock:      asyncio.Lock = asyncio.Lock()
         self._fb_last_hash:  int = 0
         self._fb_geometry_key: tuple[int, int, int, int, str, int] | None = None
@@ -692,8 +693,12 @@ class RenodeManager:
         writer = getattr(inst, writer_attr)
         if writer and not writer.is_closing():
             return True
-        if inst._fb_binary_warned:
+
+        now = asyncio.get_running_loop().time()
+        retry_after = inst._binary_retry_after.get(kind, 0.0)
+        if now < retry_after:
             return False
+
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection('127.0.0.1', inst.fb_port),
@@ -706,10 +711,12 @@ class RenodeManager:
                         inst.client_id, kind, inst.fb_port)
             return True
         except Exception as e:
-            inst._fb_binary_warned = True
-            logger.warning('%s: %s binary socket unavailable on port %d; '
-                           'falling back to Renode monitor (%s)',
-                           inst.client_id, kind, inst.fb_port, e)
+            inst._binary_retry_after[kind] = now + 2.0
+            if not inst._binary_warned.get(kind):
+                inst._binary_warned[kind] = True
+                logger.warning('%s: %s binary socket unavailable on port %d; '
+                               'falling back to Renode monitor (%s)',
+                               inst.client_id, kind, inst.fb_port, e)
             return False
 
     async def _connect_fb_binary(self, inst: RenodeInstance) -> bool:
@@ -752,7 +759,9 @@ class RenodeManager:
                 pass
             inst._fb_reader = None
             inst._fb_writer = None
-            inst._fb_binary_warned = True
+            inst._binary_retry_after['framebuffer'] = (
+                asyncio.get_running_loop().time() + 2.0
+            )
             return None
 
     async def _write_doubleword_binary(self, inst: RenodeInstance,
@@ -786,7 +795,7 @@ class RenodeManager:
                 pass
             inst._touch_reader = None
             inst._touch_writer = None
-            inst._fb_binary_warned = True
+            inst._binary_retry_after['touch'] = asyncio.get_running_loop().time() + 2.0
             return False
 
     async def _read_framebuffer(self, inst: RenodeInstance,

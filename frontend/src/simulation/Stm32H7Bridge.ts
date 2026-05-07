@@ -56,6 +56,11 @@ export interface Stm32FramebufferPatch extends Stm32Framebuffer {
 const API_BASE = (): string =>
   (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8001/api';
 
+const RAW_PASTE_CHUNK_SIZE = 512;
+const RAW_PASTE_HANDSHAKE_TIMEOUT_MS = 2500;
+const SERIAL_BUFFER_MAX = 8192;
+const SERIAL_BUFFER_KEEP = 1024;
+
 export class Stm32H7Bridge {
   readonly boardId: string;
 
@@ -120,6 +125,8 @@ export class Stm32H7Bridge {
   private _rawPasteWindowSize = 0;
   private _rawPasteEofSent = false;
   private _rawPasteFallbackCode = '';
+  private _rawPasteHandshakeTimer: number | null = null;
+  private _replTimers: number[] = [];
 
   constructor(boardId: string, firmwarePath: string | null = null) {
     this.boardId = boardId;
@@ -137,10 +144,8 @@ export class Stm32H7Bridge {
    * is armed when the first banner bytes arrive.
    */
   setPendingMicroPythonCode(code: string): void {
+    this._resetReplInjection();
     this._pendingMicroPythonCode = code;
-    this._serialBuffer = '';
-    this._replState = 'idle';
-    this._rawPasteFallbackCode = '';
   }
 
   connect(): void {
@@ -177,73 +182,8 @@ export class Stm32H7Bridge {
           if (this.onSerialData) {
             for (const ch of text) this.onSerialData(ch);
           }
-          // MicroPython REPL injection — 3-stage state machine. Each stage
-          // waits for a confirmed substring in the buffered serial output
-          // before advancing, so we never push code before raw REPL is up.
           if (this._pendingMicroPythonCode || this._replState !== 'idle') {
-            this._serialBuffer += text;
-
-            // Stage 1: friendly REPL banner → poke with \r so the ">>> "
-            // prompt (which has no trailing \n) is flushed out of Renode's
-            // UART buffer.
-            if (
-              this._replState === 'idle' &&
-              this._serialBuffer.includes('Type "help()"')
-            ) {
-              this._replState = 'banner_seen';
-              setTimeout(() => this.sendSerialBytes([0x0d]), 800);
-            }
-
-            // Stage 2: ">>>" prompt seen → Ctrl+A enters raw REPL.
-            if (
-              this._replState === 'banner_seen' &&
-              this._serialBuffer.includes('>>>')
-            ) {
-              this._replState = 'prompt_seen';
-              this._serialBuffer = '';
-              setTimeout(() => this.sendSerialBytes([0x01]), 200);
-            }
-
-            // Stage 3: "raw REPL" confirmation → safe to push code + Ctrl+D.
-            if (
-              this._replState === 'prompt_seen' &&
-              this._serialBuffer.includes('raw REPL')
-            ) {
-              this._replState = 'raw_repl_entered';
-              const code = this._pendingMicroPythonCode!;
-              this._pendingMicroPythonCode = null;
-              this._serialBuffer = '';
-              setTimeout(() => this._startRawPaste(code), 200);
-            }
-
-            if (this._replState === 'raw_paste_starting') {
-              const supportedAt = this._serialBuffer.indexOf('R\x01');
-              if (supportedAt >= 0 && this._serialBuffer.length >= supportedAt + 4) {
-                this._rawPasteWindow =
-                  this._serialBuffer.charCodeAt(supportedAt + 2) |
-                  (this._serialBuffer.charCodeAt(supportedAt + 3) << 8);
-                this._rawPasteWindowSize = this._rawPasteWindow || 128;
-                this._serialBuffer = '';
-                this._replState = 'raw_paste_sending';
-                this._pumpRawPaste();
-              } else if (this._serialBuffer.includes('R\x00')) {
-                this._serialBuffer = '';
-                this._sendCodeInRawReplFallback(this._rawPasteFallbackCode);
-              }
-            } else if (this._replState === 'raw_paste_sending') {
-              for (let i = 0; i < text.length; i++) {
-                const byte = text.charCodeAt(i) & 0xff;
-                if (byte === 0x01) {
-                  this._rawPasteWindow += this._rawPasteWindowSize;
-                  this._pumpRawPaste();
-                }
-              }
-            }
-
-            // Bound the buffer in case something never matches.
-            if (this._serialBuffer.length > 8192) {
-              this._serialBuffer = this._serialBuffer.slice(-1024);
-            }
+            this._handleReplInjectionOutput(text);
           }
           break;
         }
@@ -264,65 +204,18 @@ export class Stm32H7Bridge {
         }
         case 'framebuffer': {
           if (!this.onFramebuffer) break;
-          const b64 = (msg.data.bytes_b64 as string) ?? '';
-          if (!b64) break;
-          let bytes: Uint8Array;
-          try {
-            const bin = atob(b64);
-            bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          } catch {
-            break;
-          }
-          this.onFramebuffer({
-            width:  Number(msg.data.width)  | 0,
-            height: Number(msg.data.height) | 0,
-            pitch:  Number(msg.data.pitch)  | 0,
-            sourceWidth:
-              Number(msg.data.source_width ?? msg.data.width) | 0,
-            sourceHeight:
-              Number(msg.data.source_height ?? msg.data.height) | 0,
-            sourcePitch:
-              msg.data.source_pitch === undefined
-                ? undefined
-                : Number(msg.data.source_pitch) | 0,
-            scale:
-              msg.data.scale === undefined ? undefined : Number(msg.data.scale) | 0,
-            format: (msg.data.format as Stm32PixelFormat) ?? 'rgb565',
-            bytes,
-          });
+          const fb = Stm32H7Bridge._parseFramebuffer(msg.data);
+          if (fb) this.onFramebuffer(fb);
           break;
         }
         case 'framebuffer_patch': {
           if (!this.onFramebufferPatch) break;
-          const b64 = (msg.data.bytes_b64 as string) ?? '';
-          if (!b64) break;
-          let bytes: Uint8Array;
-          try {
-            const bin = atob(b64);
-            bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          } catch {
-            break;
-          }
+          const fb = Stm32H7Bridge._parseFramebuffer(msg.data);
+          if (!fb) break;
           this.onFramebufferPatch({
             x:      Number(msg.data.x)      | 0,
             y:      Number(msg.data.y)      | 0,
-            width:  Number(msg.data.width)  | 0,
-            height: Number(msg.data.height) | 0,
-            pitch:  Number(msg.data.pitch)  | 0,
-            sourceWidth:
-              Number(msg.data.source_width ?? msg.data.width) | 0,
-            sourceHeight:
-              Number(msg.data.source_height ?? msg.data.height) | 0,
-            sourcePitch:
-              msg.data.source_pitch === undefined
-                ? undefined
-                : Number(msg.data.source_pitch) | 0,
-            scale:
-              msg.data.scale === undefined ? undefined : Number(msg.data.scale) | 0,
-            format: (msg.data.format as Stm32PixelFormat) ?? 'rgb565',
-            bytes,
+            ...fb,
           });
           break;
         }
@@ -330,12 +223,15 @@ export class Stm32H7Bridge {
     };
 
     socket.onclose = () => {
+      if (this.socket !== socket) return;
       this._connected = false;
       this.socket = null;
+      this._resetReplInjection();
       this.onDisconnected?.();
     };
 
     socket.onerror = () => {
+      if (this.socket !== socket) return;
       this.onError?.('WebSocket error');
     };
   }
@@ -347,6 +243,7 @@ export class Stm32H7Bridge {
       this.socket = null;
     }
     this._connected = false;
+    this._resetReplInjection();
   }
 
   sendSerialByte(byte: number): void {
@@ -407,6 +304,137 @@ export class Stm32H7Bridge {
     return s;
   }
 
+  private static _decodeBase64Bytes(b64: string): Uint8Array | null {
+    try {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
+  private static _parseFramebuffer(data: Record<string, unknown>): Stm32Framebuffer | null {
+    const b64 = (data.bytes_b64 as string) ?? '';
+    if (!b64) return null;
+    const bytes = Stm32H7Bridge._decodeBase64Bytes(b64);
+    if (!bytes) return null;
+    return {
+      width: Number(data.width) | 0,
+      height: Number(data.height) | 0,
+      pitch: Number(data.pitch) | 0,
+      sourceWidth: Number(data.source_width ?? data.width) | 0,
+      sourceHeight: Number(data.source_height ?? data.height) | 0,
+      sourcePitch:
+        data.source_pitch === undefined ? undefined : Number(data.source_pitch) | 0,
+      scale: data.scale === undefined ? undefined : Number(data.scale) | 0,
+      format: (data.format as Stm32PixelFormat) ?? 'rgb565',
+      bytes,
+    };
+  }
+
+  private _resetReplInjection(): void {
+    if (this._rawPasteHandshakeTimer !== null) {
+      clearTimeout(this._rawPasteHandshakeTimer);
+      this._rawPasteHandshakeTimer = null;
+    }
+    for (const timer of this._replTimers) clearTimeout(timer);
+    this._replTimers = [];
+    this._pendingMicroPythonCode = null;
+    this._serialBuffer = '';
+    this._replState = 'idle';
+    this._rawPasteBytes = [];
+    this._rawPasteOffset = 0;
+    this._rawPasteWindow = 0;
+    this._rawPasteWindowSize = 0;
+    this._rawPasteEofSent = false;
+    this._rawPasteFallbackCode = '';
+  }
+
+  private _handleReplInjectionOutput(text: string): void {
+    this._serialBuffer += text;
+
+    if (this._replState === 'idle' && this._serialBuffer.includes('Type "help()"')) {
+      this._replState = 'banner_seen';
+      this._scheduleReplAction(() => this.sendSerialBytes([0x0d]), 800);
+    }
+
+    if (this._replState === 'banner_seen' && this._serialBuffer.includes('>>>')) {
+      this._replState = 'prompt_seen';
+      this._serialBuffer = '';
+      this._scheduleReplAction(() => this.sendSerialBytes([0x01]), 200);
+    }
+
+    if (this._replState === 'prompt_seen' && this._serialBuffer.includes('raw REPL')) {
+      this._replState = 'raw_repl_entered';
+      const code = this._pendingMicroPythonCode;
+      this._pendingMicroPythonCode = null;
+      this._serialBuffer = '';
+      if (code !== null) this._scheduleReplAction(() => this._startRawPaste(code), 200);
+    }
+
+    if (this._replState === 'raw_paste_starting') {
+      this._handleRawPasteHandshake();
+    } else if (this._replState === 'raw_paste_sending') {
+      this._handleRawPasteAcks(text);
+    }
+
+    if (this._serialBuffer.length > SERIAL_BUFFER_MAX) {
+      this._serialBuffer = this._serialBuffer.slice(-SERIAL_BUFFER_KEEP);
+    }
+  }
+
+  private _handleRawPasteHandshake(): void {
+    const supportedAt = this._serialBuffer.indexOf('R\x01');
+    if (supportedAt >= 0 && this._serialBuffer.length >= supportedAt + 4) {
+      if (this._rawPasteHandshakeTimer !== null) {
+        clearTimeout(this._rawPasteHandshakeTimer);
+        this._rawPasteHandshakeTimer = null;
+      }
+      this._rawPasteWindow =
+        this._serialBuffer.charCodeAt(supportedAt + 2) |
+        (this._serialBuffer.charCodeAt(supportedAt + 3) << 8);
+      this._rawPasteWindowSize = this._rawPasteWindow || 128;
+      this._serialBuffer = '';
+      this._replState = 'raw_paste_sending';
+      this._pumpRawPaste();
+      return;
+    }
+
+    if (this._serialBuffer.includes('R\x00')) {
+      this._fallbackFromRawPaste();
+    }
+  }
+
+  private _handleRawPasteAcks(text: string): void {
+    for (let i = 0; i < text.length; i++) {
+      const byte = text.charCodeAt(i) & 0xff;
+      if (byte === 0x01) {
+        this._rawPasteWindow += this._rawPasteWindowSize;
+        this._pumpRawPaste();
+      }
+    }
+  }
+
+  private _fallbackFromRawPaste(): void {
+    if (this._rawPasteHandshakeTimer !== null) {
+      clearTimeout(this._rawPasteHandshakeTimer);
+      this._rawPasteHandshakeTimer = null;
+    }
+    const code = this._rawPasteFallbackCode;
+    this._serialBuffer = '';
+    this._sendCodeInRawReplFallback(code);
+  }
+
+  private _scheduleReplAction(action: () => void, delayMs: number): void {
+    const timer = window.setTimeout(() => {
+      this._replTimers = this._replTimers.filter((id) => id !== timer);
+      action();
+    }, delayMs);
+    this._replTimers.push(timer);
+  }
+
   /**
    * Enter MicroPython raw-paste mode. Unlike plain raw REPL, this is
    * flow-controlled by the firmware using a small receive window, so large
@@ -423,6 +451,9 @@ export class Stm32H7Bridge {
     this._serialBuffer = '';
     this._replState = 'raw_paste_starting';
     this.sendSerialBytes([0x05, 0x41, 0x01]);
+    this._rawPasteHandshakeTimer = window.setTimeout(() => {
+      if (this._replState === 'raw_paste_starting') this._fallbackFromRawPaste();
+    }, RAW_PASTE_HANDSHAKE_TIMEOUT_MS);
   }
 
   private _pumpRawPaste(): void {
@@ -431,7 +462,7 @@ export class Stm32H7Bridge {
     while (this._rawPasteWindow > 0 && this._rawPasteOffset < this._rawPasteBytes.length) {
       const count = Math.min(
         this._rawPasteWindow,
-        512,
+        RAW_PASTE_CHUNK_SIZE,
         this._rawPasteBytes.length - this._rawPasteOffset,
       );
       this.sendSerialBytes(
@@ -460,7 +491,7 @@ export class Stm32H7Bridge {
 
     const sendChunk = () => {
       if (offset >= codeBytes.length) {
-        setTimeout(() => {
+        this._scheduleReplAction(() => {
           this.sendSerialBytes([0x04]); // Ctrl+D → compile & execute
           this._replState = 'idle';
         }, 200);
@@ -468,7 +499,7 @@ export class Stm32H7Bridge {
       }
       this.sendSerialBytes(codeBytes.slice(offset, offset + CHUNK_SIZE));
       offset += CHUNK_SIZE;
-      setTimeout(sendChunk, CHUNK_DELAY_MS);
+      this._scheduleReplAction(sendChunk, CHUNK_DELAY_MS);
     };
     sendChunk();
   }

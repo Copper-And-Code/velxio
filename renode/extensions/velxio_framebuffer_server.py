@@ -22,7 +22,7 @@ def _write_header(stream, status):
     stream.sendall(b'VXFR' + struct.pack('<I', status))
 
 
-def _client_loop(stream, sysbus):
+def _client_loop(stream, sysbus, sysbus_lock):
     try:
         while True:
             header = _read_exact(stream, 12)
@@ -36,7 +36,8 @@ def _client_loop(stream, sysbus):
             addr, count = struct.unpack('<II', header[4:])
             if command == b'VXDW':
                 try:
-                    sysbus.WriteDoubleWord(addr, count)
+                    with sysbus_lock:
+                        sysbus.WriteDoubleWord(addr, count)
                 except Exception:
                     _write_header(stream, 3)
                     continue
@@ -48,7 +49,8 @@ def _client_loop(stream, sysbus):
                 continue
 
             try:
-                data = sysbus.ReadBytes(addr, count)
+                with sysbus_lock:
+                    data = sysbus.ReadBytes(addr, count)
             except Exception:
                 _write_header(stream, 3)
                 continue
@@ -67,7 +69,8 @@ def _server_loop(port, sysbus):
     server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(('127.0.0.1', port))
-    server.listen(1)
+    server.listen(4)
+    sysbus_lock = threading.Lock()
     print('Velxio framebuffer binary server listening on 127.0.0.1:%d' % port)
 
     while True:
@@ -76,7 +79,7 @@ def _server_loop(port, sysbus):
             client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception:
             pass
-        thread = threading.Thread(target=_client_loop, args=(client, sysbus))
+        thread = threading.Thread(target=_client_loop, args=(client, sysbus, sysbus_lock))
         thread.daemon = True
         thread.start()
 
