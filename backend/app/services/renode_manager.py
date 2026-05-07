@@ -28,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 _BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_REPO_ROOT   = os.path.abspath(os.path.join(_BACKEND_DIR, '..'))
+_REPO_ROOT   = os.environ.get(
+    'VELXIO_REPO_ROOT',
+    os.path.abspath(os.path.join(_BACKEND_DIR, '..')),
+)
 RENODE_BIN   = os.environ.get('RENODE_BIN', 'renode')
 REPL_PATH    = os.path.join(_REPO_ROOT, 'renode', 'platforms', 'stm32h7_core_v13.repl')
 FB_SERVER_PY = os.path.join(_REPO_ROOT, 'renode', 'extensions', 'velxio_framebuffer_server.py')
@@ -299,6 +302,10 @@ class RenodeManager:
         if inst:
             asyncio.create_task(self._shutdown(inst))
 
+    def _drop_instance_if_current(self, inst: RenodeInstance) -> None:
+        if self._instances.get(inst.client_id) is inst:
+            self._instances.pop(inst.client_id, None)
+
     async def send_serial_bytes(self, client_id: str, data: bytes) -> None:
         inst = self._instances.get(client_id)
         if inst and inst._serial_writer:
@@ -383,12 +390,12 @@ class RenodeManager:
     async def _boot(self, inst: RenodeInstance) -> None:
         if not os.path.exists(REPL_PATH):
             await inst.emit('error', {'message': f'.repl not found at {REPL_PATH}'})
-            self._instances.pop(inst.client_id, None)
+            self._drop_instance_if_current(inst)
             return
         if not os.path.exists(inst.firmware_path):
             await inst.emit('error',
                             {'message': f'firmware not found: {inst.firmware_path}'})
-            self._instances.pop(inst.client_id, None)
+            self._drop_instance_if_current(inst)
             return
 
         inst.uart_port    = _find_free_port()
@@ -440,7 +447,7 @@ class RenodeManager:
         except FileNotFoundError:
             await inst.emit('error',
                             {'message': f'{RENODE_BIN} not found in PATH'})
-            self._instances.pop(inst.client_id, None)
+            self._drop_instance_if_current(inst)
             return
 
         inst.running = True
@@ -1139,6 +1146,13 @@ class RenodeManager:
             inst._touch_writer = None
             inst._touch_reader = None
 
+        pty_slave_name: str | None = None
+        if inst.pty_slave_fd is not None:
+            try:
+                pty_slave_name = os.ttyname(inst.pty_slave_fd)
+            except OSError:
+                pty_slave_name = None
+
         if inst.pty_master_fd is not None:
             try:
                 os.close(inst.pty_master_fd)
@@ -1153,7 +1167,10 @@ class RenodeManager:
             inst.pty_slave_fd = None
         if inst.pty_path:
             try:
-                if os.path.islink(inst.pty_path):
+                if (
+                    os.path.islink(inst.pty_path)
+                    and (pty_slave_name is None or os.readlink(inst.pty_path) == pty_slave_name)
+                ):
                     os.unlink(inst.pty_path)
             except OSError:
                 pass

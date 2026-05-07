@@ -20,6 +20,10 @@ const SCREEN_Y = 58;         // leaves room for title + top pin row
 const TOP_PIN_Y = 37;
 const BOT_PIN_Y = 311;
 const PIN_X = (i: number): number => Math.round(SCREEN_X + 17 + i * 34);
+const PCB_GREEN = '#0d3a24';
+const PCB_DARK = '#082516';
+const SILK = '#d7eadc';
+const COPPER = '#c49b37';
 
 interface Stm32PinSignal {
   type: string;
@@ -163,37 +167,79 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
         top: y,
         width: FRAME_W,
         height: FRAME_H,
-        background: 'linear-gradient(180deg, #0e2d1c 0%, #0a1f12 100%)',
-        border: '2px solid #051a0c',
-        borderRadius: 6,
-        boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+        background:
+          `linear-gradient(180deg, ${PCB_GREEN} 0%, ${PCB_DARK} 100%)`,
+        border: '2px solid #04180e',
+        borderRadius: 8,
+        boxShadow:
+          '0 8px 20px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.05)',
         pointerEvents: 'none',
         zIndex: 1,
+        overflow: 'hidden',
       }}
     >
+      <PcbTexture />
+      <MountingHole x={12} y={12} />
+      <MountingHole x={FRAME_W - 24} y={12} />
+      <MountingHole x={12} y={FRAME_H - 24} />
+      <MountingHole x={FRAME_W - 24} y={FRAME_H - 24} />
+
       {/* Silkscreen title */}
       <div
         style={{
           position: 'absolute',
-          top: 4,
+          top: 7,
           left: 0,
           right: 0,
           textAlign: 'center',
-          color: '#9ec9a8',
-          fontSize: 9,
+          color: SILK,
+          fontSize: 10,
           fontFamily: 'monospace',
-          letterSpacing: 1.6,
+          fontWeight: 700,
+          letterSpacing: 0.8,
           userSelect: 'none',
         }}
       >
-        STM32H7 CORE V13
+        STM32H743 CORE V13
+      </div>
+      <div
+        style={{
+          position: 'absolute',
+          top: 21,
+          left: 0,
+          right: 0,
+          textAlign: 'center',
+          color: '#8fbaa0',
+          fontSize: 7,
+          fontFamily: 'monospace',
+          letterSpacing: 0.2,
+          userSelect: 'none',
+        }}
+      >
+        32MB SDRAM · LTDC RGB · LVGL MicroPython
       </div>
 
       {/* On-board LEDs (PB0 red, PB1 green) — driven by stm32_gpio_change */}
-      <BoardLed x={FRAME_W - 32} y={6} color="#e02628" on={ledRed}   label="PB0" />
-      <BoardLed x={FRAME_W - 16} y={6} color="#22c55e" on={ledGreen} label="PB1" />
+      <BoardLed x={FRAME_W - 42} y={12} color="#e02628" on={ledRed} label="PB0" />
+      <BoardLed x={FRAME_W - 22} y={12} color="#22c55e" on={ledGreen} label="PB1" />
+
+      <UsbConnector x={12} y={142} />
 
       {/* LTDC display */}
+      <div
+        style={{
+          position: 'absolute',
+          left: SCREEN_X - 6,
+          top: SCREEN_Y - 6,
+          width: SCREEN_W + 12,
+          height: SCREEN_H + 12,
+          background: 'linear-gradient(180deg, #242424 0%, #0d0d0d 100%)',
+          border: '1px solid #334238',
+          borderRadius: 5,
+          boxShadow: '0 2px 9px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.06)',
+          pointerEvents: 'none',
+        }}
+      />
       <div
         style={{
           position: 'absolute',
@@ -201,9 +247,9 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
           top: SCREEN_Y,
           width: SCREEN_W,
           height: SCREEN_H,
-          background: '#000',
-          border: '1px solid #2a4a32',
-          borderRadius: 2,
+          background: '#050505',
+          border: '1px solid #050505',
+          borderRadius: 3,
           overflow: 'hidden',
           // Enable pointer events on the screen alone — the parent has
           // pointerEvents: 'none' so the rest of the PCB silkscreen
@@ -242,12 +288,31 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
             display: 'block',
           }}
         />
+        {!framebuffer && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#36463d',
+              fontSize: 11,
+              fontFamily: 'monospace',
+              letterSpacing: 0.6,
+              userSelect: 'none',
+              pointerEvents: 'none',
+            }}
+          >
+            LTDC
+          </div>
+        )}
       </div>
-
       {/* Pin pads + labels */}
       {STM32H7_PINS.map((pin) => {
         const isTop = pin.y < SCREEN_Y;
-        const labelTop = isTop ? pin.y - 21 : pin.y + 9;
+        const labelTop = isTop ? pin.y + 9 : pin.y + 9;
+        const powerPin = pin.signals.some((s) => s.type === 'power');
         return (
           <React.Fragment key={pin.name}>
             <div
@@ -259,7 +324,9 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
                 height: 14,
                 borderRadius: 2,
                 background:
-                  'radial-gradient(ellipse at 30% 30%, #f0d178 0%, #b08828 60%, #6e5414 100%)',
+                  powerPin
+                    ? 'radial-gradient(ellipse at 30% 30%, #ffe5a0 0%, #d6a73c 58%, #805c15 100%)'
+                    : `radial-gradient(ellipse at 30% 30%, #f0d178 0%, ${COPPER} 60%, #6e5414 100%)`,
                 border: '1px solid #3d2c08',
                 boxShadow: 'inset 0 0 2px rgba(0,0,0,0.4)',
                 pointerEvents: 'none',
@@ -272,10 +339,11 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
                 top: labelTop,
                 width: 60,
                 textAlign: 'center',
-                color: '#d6e9da',
+                color: powerPin ? '#ffe7a3' : SILK,
                 fontSize: 8,
                 fontFamily: 'monospace',
-                letterSpacing: 0.2,
+                fontWeight: powerPin ? 700 : 500,
+                letterSpacing: 0,
                 userSelect: 'none',
                 pointerEvents: 'none',
               }}
@@ -314,6 +382,82 @@ const BoardLed = ({ x, y, color, on, label }: BoardLedProps) => (
       pointerEvents: 'none',
     }}
   />
+);
+
+const PcbTexture = () => (
+  <>
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background:
+          'repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 18px), repeating-linear-gradient(0deg, rgba(0,0,0,0.08) 0 1px, transparent 1px 22px)',
+        opacity: 0.45,
+        pointerEvents: 'none',
+      }}
+    />
+    {Array.from({ length: 10 }, (_, i) => (
+      <div
+        key={i}
+        style={{
+          position: 'absolute',
+          left: 72 + i * 34,
+          top: 51,
+          width: 1,
+          height: 18,
+          background: 'rgba(202, 236, 212, 0.18)',
+          pointerEvents: 'none',
+        }}
+      />
+    ))}
+  </>
+);
+
+const MountingHole = ({ x, y }: { x: number; y: number }) => (
+  <div
+    style={{
+      position: 'absolute',
+      left: x,
+      top: y,
+      width: 12,
+      height: 12,
+      borderRadius: '50%',
+      background: '#06130c',
+      border: '2px solid #b9c9bc',
+      boxShadow: 'inset 0 0 4px rgba(0,0,0,0.8)',
+      pointerEvents: 'none',
+    }}
+  />
+);
+
+const UsbConnector = ({ x, y }: { x: number; y: number }) => (
+  <div
+    style={{
+      position: 'absolute',
+      left: x,
+      top: y,
+      width: 18,
+      height: 50,
+      borderRadius: 3,
+      background: 'linear-gradient(90deg, #b9bec1 0%, #747b80 100%)',
+      border: '1px solid #4b5256',
+      boxShadow: '0 2px 5px rgba(0,0,0,0.5), inset 0 0 0 2px rgba(255,255,255,0.18)',
+      pointerEvents: 'none',
+    }}
+    title="USB"
+  >
+    <div
+      style={{
+        position: 'absolute',
+        left: 4,
+        top: 13,
+        width: 8,
+        height: 24,
+        background: '#202428',
+        borderRadius: 2,
+      }}
+    />
+  </div>
 );
 
 // Throttle table for `forwardTouch` so a fast drag doesn't flood the

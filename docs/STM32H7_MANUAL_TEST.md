@@ -177,7 +177,10 @@ for _ in range(60):
 | `VELXIO_STM32_FB_FORMAT`     | auto da `L1PFCR` | Pixel format LTDC (override diagnostico)  |
 | `VELXIO_STM32_FB_MAX_WIDTH`  | `0` con binary, `512` senza | Larghezza massima preview LTDC; `0` = full-res |
 | `VELXIO_STM32_FB_BINARY`     | `1`         | Usa socket binario Renode per leggere SDRAM; `0` = solo monitor |
-| `VELXIO_RENODE_BIN`          | `renode`    | Path al binario Renode                         |
+| `RENODE_BIN`                 | `renode`    | Path al binario Renode                         |
+| `STM32H7_CORE_FIRMWARE`      | path locale lv_micropython | Path al firmware ELF STM32H7 |
+| `VELXIO_REPO_ROOT`           | root repo rilevata dal backend | Root che contiene `renode/` |
+| `VELXIO_STM32_PTY`           | `1`         | Abilita symlink PTY per debug esterno (`0` in Docker) |
 | `VELXIO_RENODE_LOG`          | (off)       | Set per loggare anche stderr di Renode         |
 
 Il socket binario framebuffer/touch viene ritentato automaticamente dopo
@@ -360,7 +363,41 @@ mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32
 Click sul canvas browser → bottone incrementa contatore, slider segue
 il drag.
 
-### 8.7 Esecuzione da editor Velxio
+### 8.7 Demo GPIO + LVGL roundtrip
+
+Vedi `docs/examples/stm32h7_led_button_roundtrip.py`. L'esempio valida il
+percorso completo fra canvas, GPIO STM32H7 e LVGL:
+
+- bottone LVGL sul display → `Pin("A9", OUT)` → LED esterno su `PA9`
+- pushbutton esterno → `Pin("A0", IN)` → label/bar sul display
+
+Cablaggio consigliato nel canvas:
+
+| Componente | Pin componente | Pin STM32H7 |
+|------------|----------------|-------------|
+| LED        | anodo          | `PA9`       |
+| LED        | catodo         | `GND.1`     |
+| Pushbutton | un lato        | `3V3`       |
+| Pushbutton | altro lato     | `PA0`       |
+
+Con questo cablaggio il pushbutton e' active-high. La simulazione del
+pushbutton sceglie il GPIO reale collegato al componente e usa il rail
+presente sull'altro lato per decidere il livello da inviare: `3V3/5V` porta
+il GPIO HIGH alla pressione, `GND` lo porta LOW. Questo evita che il componente
+scambi un rail per il pin da pilotare.
+
+L'esempio forza un solo render iniziale (`lv.timer_handler()` +
+`lv.refr_now()`), senza il vecchio warm-up a decine di refresh. Sul path
+Renode/LTDC i refresh ripetuti all'avvio sono visibili e peggiorano la
+percezione di latenza.
+
+Esecuzione diretta via PTY:
+
+```bash
+mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32h7_led_button_roundtrip.py
+```
+
+### 8.8 Esecuzione da editor Velxio
 
 Il toolbar dell'editor supporta il workflow locale via File System Access API
 su Chrome/Edge:
@@ -394,3 +431,12 @@ Il comando **Save local file** salva nello stesso handle locale quando il file
 e' stato aperto da disco. Se il file non ha ancora un handle locale, apre un
 picker "save as". In caso di errore durante la scrittura, il writer viene
 abortito per evitare file parziali.
+
+Il menu contiene anche **Save project file** e **Load project file** per
+salvare/caricare localmente l'intero progetto Velxio (`*.velxio.json`):
+board, componenti, fili, file group dell'editor e VFS Raspberry Pi. Dopo un
+load locale, le board vengono ricreate con nuovi runtime bridge e i file group
+vengono normalizzati per mantenere coerenti tab aperti, file attivo ed
+entrypoint MicroPython. Sul backend STM32H7, lo shutdown Renode non puo' piu'
+cancellare una nuova istanza avviata con lo stesso id mentre una task vecchia
+sta finendo la chiusura.

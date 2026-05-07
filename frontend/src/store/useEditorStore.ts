@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import STM32_ADVANCED_DEMO from '../data/stm32-advanced-demo.py?raw';
 
 export interface WorkspaceFile {
   id: string;
@@ -30,22 +31,6 @@ led = Pin(25, Pin.OUT)
 
 while True:
     led.toggle()
-    time.sleep(1)
-`;
-
-// STM32H7_CORE V13 (lv_micropython): no Pin.toggle() in this firmware build,
-// and PB1 is the on-board green LED wired in stm32h7_core_v13.repl.
-const DEFAULT_STM32_MICROPYTHON_CONTENT = `# Velxio STM32H7_CORE V13 — Blink
-# Lights the on-board green LED (PB1) at 1 Hz.
-from machine import Pin
-import time
-
-led = Pin('B1', Pin.OUT)
-
-while True:
-    led.value(1)
-    time.sleep(1)
-    led.value(0)
     time.sleep(1)
 `;
 
@@ -375,7 +360,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const isStm32 = groupId.includes('stm32');
         if (isMicroPython && isStm32) {
           fileName = 'main.py';
-          content = DEFAULT_STM32_MICROPYTHON_CONTENT;
+          content = STM32_ADVANCED_DEMO;
         } else if (isMicroPython && isEsp32) {
           fileName = 'main.py';
           content = DEFAULT_ESP32_MICROPYTHON_CONTENT;

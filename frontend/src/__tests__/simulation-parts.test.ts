@@ -238,6 +238,36 @@ describe('Pushbutton — attachEvents', () => {
     expect((el as any).pressed).toBe(false);
   });
 
+  it('drives the GPIO HIGH when the other side is wired to a positive rail', () => {
+    const logic = PartSimulationRegistry.get('pushbutton')!;
+    const el = makeElement({ pressed: false });
+    const sim = makeSimulator();
+
+    let pressHandler!: () => void;
+    let releaseHandler!: () => void;
+    (el.addEventListener as ReturnType<typeof vi.fn>).mockImplementation(
+      (event: string, handler: () => void) => {
+        if (event === 'button-press') pressHandler = handler;
+        if (event === 'button-release') releaseHandler = handler;
+      },
+    );
+
+    logic.attachEvents!(
+      el,
+      sim as any,
+      pinMap({
+        '1.l': -2,
+        '2.l': 0,
+      }),
+      'button-3v3',
+    );
+    pressHandler();
+    releaseHandler();
+
+    expect(sim.setPinState).toHaveBeenNthCalledWith(1, 0, true);
+    expect(sim.setPinState).toHaveBeenNthCalledWith(2, 0, false);
+  });
+
   it('cleanup removes both event listeners', () => {
     const logic = PartSimulationRegistry.get('pushbutton')!;
     const el = makeElement();

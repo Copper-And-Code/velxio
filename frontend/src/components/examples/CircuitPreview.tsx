@@ -76,6 +76,7 @@ const BOARD_DEFS: Record<string, CompDef> = {
   esp32: { svg: 'esp32-devkit-v1.svg', w: 107, h: 204 },
   'esp32-s3': { svg: 'esp32-devkit-v1.svg', w: 107, h: 204 },
   'esp32-c3': { svg: 'esp32-devkit-v1.svg', w: 107, h: 204 },
+  'stm32-h7-core-v13': { svg: '', inline: stm32H7Glyph, w: 235, h: 174 },
 };
 
 // LED color → SVG filename
@@ -125,7 +126,40 @@ function isBoardType(type: string): boolean {
     type.includes('arduino-mega') ||
     type.includes('esp32-devkit') ||
     type.includes('raspberry-pi-pico') ||
+    type.includes('stm32') ||
     type.includes('nano-rp2040')
+  );
+}
+
+function stm32H7Glyph({ w, h }: { w: number; h: number }): React.ReactElement {
+  return (
+    <svg width={w} height={h} viewBox="0 0 235 174" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4" y="4" width="227" height="166" rx="5" fill="#0b3a24" stroke="#0ea5e9" />
+      <rect x="16" y="15" width="203" height="144" rx="4" fill="#0d4a2d" stroke="#145f3b" />
+      <text x="118" y="28" textAnchor="middle" fontSize="10" fill="#d7eadc" fontWeight="700">
+        STM32H743 CORE V13
+      </text>
+      <text x="118" y="40" textAnchor="middle" fontSize="6" fill="#a9cdb7">
+        32MB SDRAM - LTDC RGB - LVGL
+      </text>
+      <rect x="29" y="50" width="177" height="90" rx="3" fill="#151515" stroke="#2c2c2c" />
+      <rect x="33" y="54" width="169" height="82" rx="2" fill="#0b0d0c" stroke="#050505" />
+      <text x="118" y="98" textAnchor="middle" fontSize="11" fill="#385445">
+        LTDC
+      </text>
+      {Array.from({ length: 12 }).map((_, i) => (
+        <g key={`top-${i}`} transform={`translate(${33 + i * 15}, 45)`}>
+          <rect x="0" y="0" width="8" height="8" rx="1" fill="#5ed6e6" stroke="#ffffff" />
+          <rect x="1" y="7" width="8" height="3" fill="#b58319" opacity="0.8" />
+        </g>
+      ))}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <g key={`bottom-${i}`} transform={`translate(${33 + i * 15}, 145)`}>
+          <rect x="0" y="0" width="8" height="8" rx="1" fill="#5ed6e6" stroke="#ffffff" />
+          <rect x="1" y="7" width="8" height="3" fill="#b58319" opacity="0.8" />
+        </g>
+      ))}
+    </svg>
   );
 }
 

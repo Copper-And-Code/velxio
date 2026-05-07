@@ -133,12 +133,34 @@ WORKDIR /app
 # Data directory for persistent SQLite database (mounted as a volume at runtime)
 RUN mkdir -p /app/data
 
+# ── STM32H7 emulation: Renode + lv_micropython firmware ─────────────────────
+# The backend runs Renode headless and loads a prebuilt lv_micropython ELF.
+# Put the locally built firmware at prebuilt/stm32h7/firmware.elf before
+# building the image. Keeping firmware prebuilt avoids making Docker rebuild
+# the full STM32/lvgl toolchain on every image build.
+ARG RENODE_PORTABLE_URL=https://builds.renode.io/renode-latest.linux-portable.tar.gz
+RUN mkdir -p /opt/renode \
+    && curl -fSL "$RENODE_PORTABLE_URL" -o /tmp/renode.tar.gz \
+    && tar -xzf /tmp/renode.tar.gz -C /opt/renode --strip-components=1 \
+    && ln -sf /opt/renode/renode /usr/local/bin/renode \
+    && rm -f /tmp/renode.tar.gz \
+    && renode --version
+
+RUN mkdir -p /app/lib/stm32h7
+COPY prebuilt/stm32h7/ /app/lib/stm32h7/
+RUN test -f /app/lib/stm32h7/firmware.elf \
+    || (echo "Missing STM32H7 firmware: copy lv_micropython firmware.elf to prebuilt/stm32h7/firmware.elf before docker build" >&2; exit 1)
+
 # Install Python backend dependencies
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend application code
 COPY backend/app/ ./app/
+
+# Copy Renode platform descriptions and Velxio Python extensions used by the
+# STM32H7 backend manager.
+COPY renode/ ./renode/
 
 # Setup Nginx configuration
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
@@ -166,6 +188,12 @@ COPY --from=qemu-provider /qemu/ /app/lib/
 # QEMU_RISCV32_LIB  → RISC-V library (ESP32-C3 and variants)
 ENV QEMU_ESP32_LIB=/app/lib/libqemu-xtensa.so
 ENV QEMU_RISCV32_LIB=/app/lib/libqemu-riscv32.so
+ENV VELXIO_REPO_ROOT=/app
+ENV RENODE_BIN=/usr/local/bin/renode
+ENV STM32H7_CORE_FIRMWARE=/app/lib/stm32h7/firmware.elf
+# PTYs are useful for local mpremote debugging but awkward in container
+# namespaces. The browser path uses WebSockets and does not need them.
+ENV VELXIO_STM32_PTY=0
 
 # ── ESP-IDF toolchain for ESP32 compilation ──────────────────────────────────
 # Copied from espidf-builder stage: IDF framework + cross-compiler toolchains

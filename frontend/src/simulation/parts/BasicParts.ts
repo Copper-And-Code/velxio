@@ -2,24 +2,37 @@ import { PartSimulationRegistry } from './PartSimulationRegistry';
 import { useElectricalStore } from '../../store/useElectricalStore';
 import { emitPropertyChange } from './partUtils';
 
+const PUSHBUTTON_PINS = ['1.l', '2.l', '1.r', '2.r'];
+
+function getPushbuttonDrive(
+  getArduinoPinHelper: (componentPinName: string) => number | null,
+): { gpioPin: number | null; pressedState: boolean; releasedState: boolean } {
+  const resolvedPins = PUSHBUTTON_PINS.map((name) => getArduinoPinHelper(name));
+  const gpioPin = resolvedPins.find((pin): pin is number => pin !== null && pin >= 0) ?? null;
+  const hasPositiveRail = resolvedPins.some((pin) => pin === -2);
+  const hasGroundRail = resolvedPins.some((pin) => pin === -1);
+  const pressedState = hasPositiveRail && !hasGroundRail ? true : false;
+  return {
+    gpioPin,
+    pressedState,
+    releasedState: !pressedState,
+  };
+}
+
 /**
  * Basic Pushbutton implementation (full-size)
  */
 PartSimulationRegistry.register('pushbutton', {
   attachEvents: (element, avrSimulator, getArduinoPinHelper, componentId) => {
-    const arduinoPin =
-      getArduinoPinHelper('1.l') ??
-      getArduinoPinHelper('2.l') ??
-      getArduinoPinHelper('1.r') ??
-      getArduinoPinHelper('2.r');
+    const { gpioPin, pressedState, releasedState } = getPushbuttonDrive(getArduinoPinHelper);
 
     const onButtonPress = () => {
-      if (arduinoPin !== null) avrSimulator.setPinState(arduinoPin, false); // Active LOW
+      if (gpioPin !== null) avrSimulator.setPinState(gpioPin, pressedState);
       (element as any).pressed = true;
       emitPropertyChange(componentId, 'pressed', true);
     };
     const onButtonRelease = () => {
-      if (arduinoPin !== null) avrSimulator.setPinState(arduinoPin, true);
+      if (gpioPin !== null) avrSimulator.setPinState(gpioPin, releasedState);
       (element as any).pressed = false;
       emitPropertyChange(componentId, 'pressed', false);
     };
@@ -38,19 +51,15 @@ PartSimulationRegistry.register('pushbutton', {
  */
 PartSimulationRegistry.register('pushbutton-6mm', {
   attachEvents: (element, avrSimulator, getArduinoPinHelper, componentId) => {
-    const arduinoPin =
-      getArduinoPinHelper('1.l') ??
-      getArduinoPinHelper('2.l') ??
-      getArduinoPinHelper('1.r') ??
-      getArduinoPinHelper('2.r');
+    const { gpioPin, pressedState, releasedState } = getPushbuttonDrive(getArduinoPinHelper);
 
     const onPress = () => {
-      if (arduinoPin !== null) avrSimulator.setPinState(arduinoPin, false);
+      if (gpioPin !== null) avrSimulator.setPinState(gpioPin, pressedState);
       (element as any).pressed = true;
       emitPropertyChange(componentId, 'pressed', true);
     };
     const onRelease = () => {
-      if (arduinoPin !== null) avrSimulator.setPinState(arduinoPin, true);
+      if (gpioPin !== null) avrSimulator.setPinState(gpioPin, releasedState);
       (element as any).pressed = false;
       emitPropertyChange(componentId, 'pressed', false);
     };

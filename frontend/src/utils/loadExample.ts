@@ -65,7 +65,6 @@ export async function loadExample(
     setComponents,
     setWires,
     setBoardType,
-    activeBoardId,
     boards,
     addBoard,
     removeBoard,
@@ -90,7 +89,18 @@ export async function loadExample(
 
       if (eb.code) {
         const AVR_BOARDS = ['arduino-uno', 'arduino-nano', 'arduino-mega', 'attiny85'];
-        const filename = AVR_BOARDS.includes(boardId) ? 'sketch.ino' : 'main.cpp';
+        const MICROPYTHON_BOARDS = [
+          'raspberry-pi-pico',
+          'esp32',
+          'esp32-s3',
+          'esp32-c3',
+          'stm32-h7-core-v13',
+        ];
+        const filename = AVR_BOARDS.includes(boardId)
+          ? 'sketch.ino'
+          : MICROPYTHON_BOARDS.includes(boardId)
+            ? 'main.py'
+            : 'main.cpp';
         useEditorStore.getState().setActiveGroup(board.activeFileGroupId);
         useEditorStore.getState().loadFiles([{ name: filename, content: eb.code }]);
       }
@@ -111,7 +121,8 @@ export async function loadExample(
         eb.boardKind !== 'raspberry-pi-3' &&
         eb.boardKind !== 'esp32' &&
         eb.boardKind !== 'esp32-s3' &&
-        eb.boardKind !== 'esp32-c3',
+        eb.boardKind !== 'esp32-c3' &&
+        eb.boardKind !== 'stm32-h7-core-v13',
     );
     if (firstArduino) {
       setActiveBoardId(firstArduino.boardKind);
@@ -122,7 +133,8 @@ export async function loadExample(
         !comp.type.includes('arduino') &&
         !comp.type.includes('pico') &&
         !comp.type.includes('raspberry') &&
-        !comp.type.includes('esp32'),
+        !comp.type.includes('esp32') &&
+        !comp.type.includes('stm32'),
     );
     setComponents(
       componentsWithoutBoard.map((comp) => ({
@@ -155,10 +167,15 @@ export async function loadExample(
       currentIds.forEach((id) => removeBoard(id));
     } else {
       const targetBoard = example.boardType || 'arduino-uno';
+      const needsFreshBoard = targetBoard === 'stm32-h7-core-v13';
       // If boards[] is empty (e.g. a previous analog example removed every
       // board), setBoardType can't work — it only maps over existing entries.
-      // Add a fresh board instead.
-      if (useSimulatorStore.getState().boards.length === 0) {
+      // Add a fresh board instead. STM32H7 also needs addBoard because it
+      // creates the Renode bridge and the MicroPython file group.
+      if (useSimulatorStore.getState().boards.length === 0 || needsFreshBoard) {
+        if (needsFreshBoard) {
+          useSimulatorStore.getState().boards.forEach((board) => removeBoard(board.id));
+        }
         const newId = addBoard(
           targetBoard as BoardKind,
           DEFAULT_BOARD_POSITION.x,
@@ -166,7 +183,7 @@ export async function loadExample(
         );
         setActiveBoardId(newId);
       } else {
-        setBoardType(targetBoard);
+        setBoardType(targetBoard as Parameters<typeof setBoardType>[0]);
       }
     }
     useEditorStore.getState().setCode(example.code);
@@ -175,7 +192,8 @@ export async function loadExample(
       (comp) =>
         !comp.type.includes('arduino') &&
         !comp.type.includes('pico') &&
-        !comp.type.includes('esp32'),
+        !comp.type.includes('esp32') &&
+        !comp.type.includes('stm32'),
     );
     setComponents(
       componentsWithoutBoard.map((comp) => ({

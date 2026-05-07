@@ -13,6 +13,12 @@ import { InstallLibrariesModal } from '../simulator/InstallLibrariesModal';
 import { parseCompileResult } from '../../utils/compilationLogger';
 import type { CompilationLog } from '../../utils/compilationLogger';
 import { exportToWokwiZip, importFromWokwiZip } from '../../utils/wokwiZip';
+import {
+  createLocalProjectSnapshot,
+  downloadLocalProject,
+  loadLocalProject,
+  readLocalProjectFile,
+} from '../../utils/localProjectFile';
 import { readFirmwareFile } from '../../utils/firmwareLoader';
 import {
   trackCompileCode,
@@ -60,6 +66,15 @@ const LOCAL_SOURCE_TYPES = [
     description: 'Source files',
     accept: {
       'text/plain': ['.py', '.ino', '.c', '.cpp', '.h', '.hpp', '.txt', '.md', '.json'],
+    },
+  },
+];
+
+const LOCAL_PROJECT_TYPES = [
+  {
+    description: 'Velxio project',
+    accept: {
+      'application/json': ['.velxio.json', '.json'],
     },
   },
 ];
@@ -188,6 +203,7 @@ export const EditorToolbar = ({
   const [pendingLibraries, setPendingLibraries] = useState<string[]>([]);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const projectImportInputRef = useRef<HTMLInputElement>(null);
   const firmwareInputRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -631,6 +647,46 @@ export const EditorToolbar = ({
     }
   };
 
+  const handleSaveLocalProject = async () => {
+    try {
+      const snapshot = createLocalProjectSnapshot(currentProject?.slug ?? 'Velxio Project');
+      const picker = window as FilePickerWindow;
+
+      if (picker.showSaveFilePicker) {
+        const handle = await picker.showSaveFilePicker({
+          suggestedName: `${snapshot.name.replace(/[^A-Za-z0-9._-]+/g, '-')}.velxio.json`,
+          types: LOCAL_PROJECT_TYPES,
+        });
+        await writeLocalFile(handle, JSON.stringify(snapshot, null, 2));
+        setMessage({ type: 'success', text: `Saved project file: ${handle.name}` });
+        return;
+      }
+
+      const filename = downloadLocalProject(snapshot);
+      setMessage({ type: 'success', text: `Downloaded project file: ${filename}` });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      const errMsg = err instanceof Error ? err.message : 'Save project file failed.';
+      setMessage({ type: 'error', text: errMsg });
+    }
+  };
+
+  const handleLoadLocalProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!projectImportInputRef.current) return;
+    projectImportInputRef.current.value = '';
+    if (!file) return;
+
+    try {
+      const project = await readLocalProjectFile(file);
+      await loadLocalProject(project);
+      setMessage({ type: 'success', text: `Loaded project file: ${file.name}` });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Load project file failed.';
+      setMessage({ type: 'error', text: errMsg });
+    }
+  };
+
   const handleOpenLocalFile = async () => {
     const picker = window as FilePickerWindow;
     if (!picker.showOpenFilePicker) {
@@ -912,6 +968,14 @@ export const EditorToolbar = ({
               style={{ display: 'none' }}
               onChange={handleImportFile}
             />
+            {/* Hidden file input for Velxio project import */}
+            <input
+              ref={projectImportInputRef}
+              type="file"
+              accept=".velxio.json,.json"
+              style={{ display: 'none' }}
+              onChange={handleLoadLocalProject}
+            />
             {/* Hidden file input for firmware upload */}
             <input
               ref={firmwareInputRef}
@@ -1015,6 +1079,53 @@ export const EditorToolbar = ({
                       <polyline points="7 3 7 8 15 8" />
                     </svg>
                     Save local file
+                  </button>
+                  <div style={{ borderTop: '1px solid #3c3c3c', margin: '4px 0' }} />
+                  <button
+                    className="tb-overflow-item"
+                    onClick={() => {
+                      handleSaveLocalProject();
+                      setOverflowOpen(false);
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M19 21H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2z" />
+                      <path d="M12 11v6" />
+                      <path d="m9 14 3 3 3-3" />
+                    </svg>
+                    Save project file
+                  </button>
+                  <button
+                    className="tb-overflow-item"
+                    onClick={() => {
+                      projectImportInputRef.current?.click();
+                      setOverflowOpen(false);
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                      <path d="M12 17v-6" />
+                      <path d="m9 14 3-3 3 3" />
+                    </svg>
+                    Load project file
                   </button>
                   <div style={{ borderTop: '1px solid #3c3c3c', margin: '4px 0' }} />
                   <button

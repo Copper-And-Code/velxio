@@ -6,6 +6,7 @@
 
 import { circuitExamples } from './examples-circuits';
 import { analogExamples } from './examples-analog';
+import STM32_ADVANCED_DEMO from './stm32-advanced-demo.py?raw';
 
 /** Per-board setup for multi-board examples */
 export interface ExampleBoard {
@@ -32,7 +33,8 @@ export interface ExampleProject {
     | 'arduino-mega'
     | 'raspberry-pi-pico'
     | 'esp32'
-    | 'esp32-c3';
+    | 'esp32-c3'
+    | 'stm32-h7-core-v13';
   /** Board filter key used in the gallery board selector. Derived from boardType if omitted. */
   boardFilter?: string;
   /**
@@ -6478,12 +6480,28 @@ void loop() {
   },
 ];
 
+const stm32Examples: ExampleProject[] = [
+  {
+    id: 'stm32h7-advanced-demo',
+    title: 'STM32H7 Advanced Demo',
+    description: 'LVGL widgets demo for the STM32H743 CORE V13 board with LTDC display and touch.',
+    category: 'displays',
+    difficulty: 'advanced',
+    boardType: 'stm32-h7-core-v13',
+    boardFilter: 'stm32-h7-core-v13',
+    code: STM32_ADVANCED_DEMO,
+    components: [],
+    wires: [],
+  },
+];
+
 // Merge legacy examples with circuit-focused examples (analog, digital gates,
 // electromechanical) plus the board-less analog SPICE suite. Declared after
 // all arrays exist so the export is a single immutable value — safe from
 // tree-shaking quirks.
 export const exampleProjects: ExampleProject[] = [
   ...legacyExamples,
+  ...stm32Examples,
   ...circuitExamples,
   ...analogExamples,
 ];

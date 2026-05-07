@@ -89,9 +89,17 @@ porting:
 - `framebuffer_patch` lato backend/frontend per aggiornare solo righe cambiate
 - pixel format LTDC rilevato da `L1PFCR` invece di assumere RGB565 fisso
 - editor Velxio capace di aprire/salvare file locali via File System Access API
+- salvataggio/caricamento locale dell'intero progetto Velxio (`*.velxio.json`)
+  con board, fili, componenti, file group editor e VFS Raspberry Pi
 - Run MicroPython esegue il file attivo nel tab, non sempre `main.py`
 - injection STM32H7 via MicroPython raw-paste flow-controlled, stabile anche
   con `docs/examples/advanced_demo.py`
+- esempio roundtrip STM32H7 + LVGL + GPIO: bottone touch sul display pilota LED
+  esterno su `PA9`, pushbutton esterno su `PA0` aggiorna label/bar LTDC
+- pushbutton canvas robusto per cablaggi active-high (`3V3/5V`) e active-low
+  (`GND`), senza scambiare i rail per GPIO reali
+- loader progetto e backend Renode resi piu' robusti contro il riuso immediato
+  dello stesso board id dopo load/stop/start
 
 Il monitor testuale resta fallback di compatibilita'. Le note operative
 aggiornate stanno in [`STM32H7_MANUAL_TEST.md`](STM32H7_MANUAL_TEST.md).
