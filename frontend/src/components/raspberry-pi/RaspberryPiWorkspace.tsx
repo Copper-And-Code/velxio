@@ -8,12 +8,14 @@
 
 import React, { useState, lazy, Suspense, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import type { ComponentType } from 'react';
 import { VirtualFileSystem } from './VirtualFileSystem';
 import { useVfsStore } from '../../store/useVfsStore';
 import { getBoardBridge, useSimulatorStore } from '../../store/useSimulatorStore';
 
 // Lazy-load PiTerminal so @xterm/xterm is only bundled when needed
 const PiTerminal = lazy(() => import('./PiTerminal').then((m) => ({ default: m.PiTerminal })));
+const MonacoEditor = Editor as unknown as ComponentType<any>;
 
 interface RaspberryPiWorkspaceProps {
   boardId: string;
@@ -214,7 +216,7 @@ export const RaspberryPiWorkspace: React.FC<RaspberryPiWorkspaceProps> = ({ boar
               <PiTerminal boardId={boardId} />
             </Suspense>
           ) : activeFileNode ? (
-            <Editor
+            <MonacoEditor
               key={activePane}
               height="100%"
               language={activeFileNode.name.endsWith('.py') ? 'python' : 'shell'}

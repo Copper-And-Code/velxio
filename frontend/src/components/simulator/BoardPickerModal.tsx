@@ -2,7 +2,7 @@ import React from 'react';
 import type { BoardKind } from '../../types/board';
 import { BOARD_KIND_LABELS } from '../../types/board';
 
-const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
+const BOARD_DESCRIPTIONS: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '8-bit AVR, 32KB flash, 14 digital I/O',
   'arduino-nano': 'Compact 8-bit AVR, same as Uno',
   'arduino-mega': '8-bit AVR, 256KB flash, 54 digital I/O',
@@ -14,7 +14,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'stm32-h7-core-v13': 'STM32H743 Cortex-M7 480MHz, 32MB SDRAM, 1024×600 LTDC (Renode)',
 };
 
-const BOARD_ICON: Record<BoardKind, string> = {
+const BOARD_ICON: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '⬤',
   'arduino-nano': '▪',
   'arduino-mega': '▬',

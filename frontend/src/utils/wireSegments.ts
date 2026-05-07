@@ -26,7 +26,7 @@ export function getPathPoints(wire: Wire): Array<{ x: number; y: number }> {
 
   points.push({ x: wire.start.x, y: wire.start.y });
 
-  for (const cp of wire.controlPoints) {
+  for (const cp of wire.controlPoints ?? []) {
     points.push({ x: cp.x, y: cp.y });
   }
 

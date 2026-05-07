@@ -376,7 +376,7 @@ export class Esp32C3Simulator {
 
   // ── Async ROM binary loader ──────────────────────────────────────────────
 
-  // @ts-expect-error kept for future use when more peripherals are emulated
+  // @ts-ignore kept for future use when more peripherals are emulated
   private async _loadRom(): Promise<void> {
     try {
       const resp = await fetch('/boards/esp32c3-rom.bin');

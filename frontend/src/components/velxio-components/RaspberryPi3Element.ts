@@ -12,7 +12,7 @@ class RaspberryPi3Element extends HTMLElement {
   }
 
   get pinInfo() {
-    const pins = [];
+    const pins: Array<{ name: string; x: number; y: number; signals: unknown[] }> = [];
     const startX = 20;
     const startY = 10;
     const pinSpacing = 10;

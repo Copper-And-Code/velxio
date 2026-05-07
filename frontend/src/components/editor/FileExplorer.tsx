@@ -92,7 +92,7 @@ const IcoChevron = ({ open }: { open: boolean }) => (
 );
 
 // Board emoji icons — mirrors BoardPickerModal
-const BOARD_ICON: Record<BoardKind, string> = {
+const BOARD_ICON: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '⬤',
   'arduino-nano': '▪',
   'arduino-mega': '▬',
@@ -105,7 +105,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
 };
 
 // Color accent per board family
-const BOARD_COLOR: Record<BoardKind, string> = {
+const BOARD_COLOR: Partial<Record<BoardKind, string>> = {
   'arduino-uno': '#4fc3f7',
   'arduino-nano': '#4fc3f7',
   'arduino-mega': '#4fc3f7',

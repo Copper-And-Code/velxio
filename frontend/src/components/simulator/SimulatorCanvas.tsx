@@ -802,7 +802,6 @@ export const SimulatorCanvas = () => {
       switch (board.boardKind) {
         case 'raspberry-pi-pico':
         case 'pi-pico-w':
-        case 'nano-rp2040':
           ledPin = 25; // GPIO25
           break;
         default:

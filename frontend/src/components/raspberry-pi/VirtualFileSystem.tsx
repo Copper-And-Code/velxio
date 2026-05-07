@@ -80,14 +80,14 @@ interface NodeRowProps {
   onContext: (e: React.MouseEvent, nodeId: string, isDir: boolean) => void;
   renamingId: string | null;
   renameValue: string;
-  renameInputRef: React.RefObject<HTMLInputElement>;
+  renameInputRef: React.RefObject<HTMLInputElement | null>;
   onRenameChange: (v: string) => void;
   onRenameCommit: () => void;
   onRenameCancel: () => void;
   creatingIn: string | null;
   newNodeName: string;
   newNodeType: 'file' | 'directory';
-  newNodeInputRef: React.RefObject<HTMLInputElement>;
+  newNodeInputRef: React.RefObject<HTMLInputElement | null>;
   onNewNameChange: (v: string) => void;
   onNewNameCommit: () => void;
   onNewNameCancel: () => void;

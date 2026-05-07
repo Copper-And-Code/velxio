@@ -17,7 +17,8 @@ import type { Wire, WireControlPoint } from '../types/wire';
  * @returns SVG path string (e.g., "M 10 20 L 30 20 L 30 50")
  */
 export function generateWirePath(wire: Wire): string {
-  const { start, end, controlPoints } = wire;
+  const { start, end } = wire;
+  const controlPoints = wire.controlPoints ?? [];
 
   if (controlPoints.length === 0) {
     // Phase 1: Simple L-shape routing
@@ -85,14 +86,15 @@ function generateMultiSegmentPath(
  * @returns Total path length in pixels
  */
 export function calculateWireLength(wire: Wire): number {
-  const { start, end, controlPoints } = wire;
+  const { start, end } = wire;
+  const controlPoints = wire.controlPoints ?? [];
 
   let totalLength = 0;
-  let prevPoint = start;
+  let prevPoint: { x: number; y: number } = start;
 
   for (const cp of controlPoints) {
     totalLength += Math.abs(cp.x - prevPoint.x) + Math.abs(cp.y - prevPoint.y);
-    prevPoint = cp;
+    prevPoint = { x: cp.x, y: cp.y };
   }
 
   totalLength += Math.abs(end.x - prevPoint.x) + Math.abs(end.y - prevPoint.y);

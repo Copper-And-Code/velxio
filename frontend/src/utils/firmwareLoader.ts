@@ -296,7 +296,7 @@ export async function readFirmwareFile(
         message = `Loaded ELF firmware (${archName}, ${(file.size / 1024).toFixed(1)} KB) → Intel HEX`;
       } else {
         // RP2040/ESP32 need base64 binary
-        program = arrayBufferToBase64(loadData.buffer);
+        program = arrayBufferToBase64(loadData.buffer as ArrayBuffer);
         message = `Loaded ELF firmware (${archName}, ${(file.size / 1024).toFixed(1)} KB) → binary`;
       }
       break;

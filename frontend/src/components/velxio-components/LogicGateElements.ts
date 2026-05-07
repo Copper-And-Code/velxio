@@ -224,7 +224,7 @@ if (!customElements.get('velxio-logic-not'))
 
 function nInputPinInfo(count: number, height: number, bodyRight: number) {
   const spacing = height / (count + 1);
-  const pins = [];
+  const pins: Array<{ name: string; x: number; y: number; number: number; signals: unknown[] }> = [];
   for (let i = 0; i < count; i++) {
     const letter = String.fromCharCode(65 + i); // A, B, C, D
     pins.push({ name: letter, x: 0, y: Math.round((i + 1) * spacing), number: i + 1, signals: [] });

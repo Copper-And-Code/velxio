@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
-// Web Components JSX declarations
-declare namespace JSX {
-  interface IntrinsicElements {
+type VelxioWebComponentProps = Record<string, unknown>;
+
+interface VelxioWebComponents {
     'wokwi-led': any;
     'wokwi-resistor': any;
     'wokwi-pushbutton': any;
@@ -101,5 +101,48 @@ declare namespace JSX {
     'velxio-flip-flop-t': any;
     'velxio-flip-flop-jk': any;
     'velxio-motor-driver-l293d': any;
+    'velxio-esp32': any;
+    'velxio-pi-pico-w': any;
+    [elemName: string]: VelxioWebComponentProps;
+}
+
+// Web Components JSX declarations. React 19 reads JSX intrinsic elements from
+// React.JSX, while older tooling still consults the global JSX namespace.
+declare namespace JSX {
+  interface IntrinsicElements extends VelxioWebComponents {}
+}
+
+declare namespace React {
+  namespace JSX {
+    interface IntrinsicElements extends VelxioWebComponents {}
   }
+}
+
+declare module 'rp2040js' {
+  export class RP2040 {
+    constructor(...args: any[]);
+    [key: string]: any;
+  }
+  export class USBCDC {
+    constructor(...args: any[]);
+    [key: string]: any;
+  }
+  export class RPI2C {
+    constructor(...args: any[]);
+    [key: string]: any;
+  }
+  export class ConsoleLogger {
+    constructor(...args: any[]);
+    [key: string]: any;
+  }
+  export const LogLevel: Record<string, any>;
+  export enum GPIOPinState {
+    Low = 0,
+    High = 1,
+    InputPullUp = 2,
+  }
+}
+
+declare module 'rp2040js/dist/esm' {
+  export * from 'rp2040js';
 }

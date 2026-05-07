@@ -1,5 +1,8 @@
 import Editor from '@monaco-editor/react';
+import type { ComponentType } from 'react';
 import { useEditorStore } from '../../store/useEditorStore';
+
+const MonacoEditor = Editor as unknown as ComponentType<any>;
 
 function getLanguage(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
@@ -16,7 +19,7 @@ export const CodeEditor = () => {
 
   return (
     <div style={{ height: '100%', width: '100%' }}>
-      <Editor
+      <MonacoEditor
         // key forces a fresh editor instance per file (preserves undo/redo per file)
         key={activeFileId}
         height="100%"

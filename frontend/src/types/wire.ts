@@ -5,6 +5,12 @@ export interface WireEndpoint {
   y: number;
 }
 
+export interface WireControlPoint {
+  id?: string;
+  x: number;
+  y: number;
+}
+
 /**
  * Logical signal type carried by a wire. Used by `wireColors` for
  * visual coding and by `Interconnect` as a hint for cross-process
@@ -29,6 +35,8 @@ export interface Wire {
   end: WireEndpoint;
   /** Intermediate waypoints clicked by the user during wire creation */
   waypoints: { x: number; y: number }[];
+  /** Legacy bezier/orthogonal control points used by older wire utilities. */
+  controlPoints?: WireControlPoint[];
   color: string;
   /**
    * Optional logical signal classification (digital, i2c, usart, …).

@@ -63,7 +63,7 @@ function buildPinInfo() {
     40: 'GPIO21',
   };
 
-  const pins = [];
+  const pins: Array<{ name: string; x: number; y: number }> = [];
   for (let col = 0; col < 20; col++) {
     const oddPin = col * 2 + 1; // top row
     const evenPin = col * 2 + 2; // bottom row
