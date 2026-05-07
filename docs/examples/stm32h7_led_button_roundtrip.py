@@ -21,6 +21,11 @@ Run with:
 
 import time
 
+# `partial` is more stable for complex LVGL demos in Renode, but this
+# roundtrip example prioritizes click-to-widget latency over animation
+# stability, so use a single DIRECT framebuffer.
+LTDC_RENDER_MODE = "direct_single"
+
 import display_driver
 import lvgl as lv
 import stm
@@ -29,10 +34,8 @@ from machine import Pin
 
 try:
     ANIM_OFF = lv.ANIM.OFF
-    ANIM_ON = lv.ANIM.ON
 except AttributeError:
     ANIM_OFF = 0
-    ANIM_ON = 1
 
 
 # ── Hardware pins ─────────────────────────────────────────────────────────
@@ -52,14 +55,8 @@ except AttributeError:
     button = Pin(BUTTON_PIN, Pin.IN)
 
 
-# ── Display mode ──────────────────────────────────────────────────────────
-# Keep LTDC and LVGL on a single DIRECT buffer. This is the most predictable
-# mode for the Velxio framebuffer poller because every rendered update lands
-# in the buffer currently scanned by LTDC.
-
+# ── Display ───────────────────────────────────────────────────────────────
 disp_drv = lv.display_get_default()
-buf1 = display_driver.disp.framebuffer(1)
-disp_drv.set_buffers(buf1, None, len(buf1), lv.DISPLAY_RENDER_MODE.DIRECT)
 
 
 # ── Touch mailbox layout ─────────────────────────────────────────────────
@@ -110,11 +107,14 @@ subtitle.set_text("LVGL button drives PA9 LED - PA0 button updates the screen")
 subtitle.set_style_text_color(lv.color_hex(0x9CC9D6), 0)
 subtitle.align(lv.ALIGN.TOP_MID, 0, 56)
 
-led_btn = lv.button(scr)
+led_btn = lv.obj(scr)
 led_btn.set_size(300, 120)
 led_btn.align(lv.ALIGN.LEFT_MID, 90, -20)
+led_btn.add_flag(lv.obj.FLAG.CLICKABLE)
+led_btn.remove_flag(lv.obj.FLAG.SCROLLABLE)
 led_btn.set_style_radius(18, 0)
 led_btn.set_style_bg_color(lv.color_hex(0x2A9D8F), 0)
+led_btn.set_style_border_width(0, 0)
 
 led_btn_label = lv.label(led_btn)
 led_btn_label.set_text("LVGL LED: OFF")
@@ -122,7 +122,7 @@ led_btn_label.set_style_text_color(lv.color_hex(0xFFFFFF), 0)
 led_btn_label.center()
 
 status = lv.label(scr)
-status.set_text("External button PA0: released")
+status.set_text("External button PA0: waiting")
 status.set_style_text_color(lv.color_hex(0xE9C46A), 0)
 status.align(lv.ALIGN.RIGHT_MID, -110, -62)
 
@@ -147,16 +147,20 @@ button_presses = [0]
 
 
 def refresh_now():
-    scr.invalidate()
     lv.timer_handler()
     lv.refr_now(disp_drv)
 
 
 def set_led_state(value, refresh=True):
-    led_state[0] = 1 if value else 0
-    led.value(led_state[0])
-    led_btn_label.set_text("LVGL LED: " + ("ON" if led_state[0] else "OFF"))
-    led_btn.set_style_bg_color(lv.color_hex(0xE76F51 if led_state[0] else 0x2A9D8F), 0)
+    next_state = 1 if value else 0
+    if led_state[0] == next_state:
+        led.value(next_state)
+        return
+
+    led_state[0] = next_state
+    led.value(next_state)
+    led_btn_label.set_text("LVGL LED: " + ("ON" if next_state else "OFF"))
+    led_btn.set_style_bg_color(lv.color_hex(0xE76F51 if next_state else 0x2A9D8F), 0)
     if refresh:
         refresh_now()
 
@@ -184,17 +188,18 @@ def handle_external_button():
 
     last_button = current
 
-    status.set_text("External button PA0: " + ("pressed" if current else "released"))
-    if current:
-        button_presses[0] += 1
-        counter_label.set_text("External presses: " + str(button_presses[0]))
-        bar.set_value(button_presses[0] % 21, ANIM_ON)
+    if not current:
+        return
+
+    button_presses[0] += 1
+    status.set_text("External button PA0: pressed")
+    counter_label.set_text("External presses: " + str(button_presses[0]))
+    bar.set_value(button_presses[0] % 21, ANIM_OFF)
     refresh_now()
 
 
 # ── Initial render ────────────────────────────────────────────────────────
 
-set_led_state(0, refresh=False)
 lv.tick_inc(20)
 refresh_now()
 

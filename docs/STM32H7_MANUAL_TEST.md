@@ -176,6 +176,7 @@ for _ in range(60):
 | `VELXIO_STM32_FB_POLL_MS`    | `300`       | Cadenza di polling LTDC (ms)                   |
 | `VELXIO_STM32_FB_FORMAT`     | auto da `L1PFCR` | Pixel format LTDC (override diagnostico)  |
 | `VELXIO_STM32_FB_MAX_WIDTH`  | `0` con binary, `512` senza | Larghezza massima preview LTDC; `0` = full-res |
+| `VELXIO_STM32_FB_BAND_ROWS`  | `16`        | Altezza delle bande full-res usate per diff/patch framebuffer |
 | `VELXIO_STM32_FB_BINARY`     | `1`         | Usa socket binario Renode per leggere SDRAM; `0` = solo monitor |
 | `RENODE_BIN`                 | `renode`    | Path al binario Renode                         |
 | `STM32H7_CORE_FIRMWARE`      | path locale lv_micropython | Path al firmware ELF STM32H7 |
@@ -335,10 +336,17 @@ serializza gli accessi a `sysbus` con un lock interno, cosi' letture
 framebuffer e scritture mailbox concorrenti non corrono una contro l'altra
 dentro Renode.
 
-Dopo il primo frame completo, il backend emette `framebuffer_patch` riga per
-riga solo quando il contenuto campionato cambia. Il canvas viene aggiornato
-subito alla ricezione della patch, senza aspettare la fine della scansione
-successiva del framebuffer intero.
+Dopo il primo frame completo, il backend mantiene una cache del framebuffer.
+In preview scalata emette `framebuffer_patch` riga per riga quando il contenuto
+campionato cambia; in full-resolution legge il framebuffer a bande
+configurabili (`VELXIO_STM32_FB_BAND_ROWS`, default 16 righe) e invia solo le
+bande mutate. Il canvas viene aggiornato subito alla ricezione della patch,
+senza dover ricevere e decodificare ogni volta un frame 1024x600 completo.
+
+Questa ottimizzazione riduce soprattutto WebSocket/base64/decode/canvas paint.
+Il backend deve comunque scansionare la SDRAM per scoprire cosa e' cambiato;
+la fase successiva per un salto piu' netto e' far pubblicare a LVGL i dirty
+rect reali dal `flush_cb`.
 
 Mitigazioni:
 - Abbassare `VELXIO_STM32_FB_MAX_WIDTH` (es. `384` o `256`) se serve più
@@ -362,6 +370,21 @@ mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32
 
 Click sul canvas browser → bottone incrementa contatore, slider segue
 il drag.
+
+Il driver LTDC Velxio supporta tre modalita' selezionabili dallo script
+MicroPython prima di `import display_driver`:
+
+```python
+LTDC_RENDER_MODE = "direct_single"  # latenza minore, un framebuffer DIRECT
+LTDC_RENDER_MODE = "partial"        # dirty-rect su schermate semplici RGB565
+LTDC_PARTIAL_LINES = 200            # altezza dei draw buffer in partial
+```
+
+La board usa `partial` come default firmware per il driver comune RGB565,
+mentre i demo touch/roundtrip forzano `direct_single` per privilegiare la
+reazione click → widget. `advanced_demo.py` ha invece un init LTDC proprio in
+RGB888 e resta su `direct` a doppio framebuffer: su quel demo `direct_single`
+mostra tearing, mentre il path `partial` RGB888 non e' ancora affidabile.
 
 ### 8.7 Demo GPIO + LVGL roundtrip
 
@@ -397,7 +420,36 @@ Esecuzione diretta via PTY:
 mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32h7_led_button_roundtrip.py
 ```
 
-### 8.8 Esecuzione da editor Velxio
+### 8.8 Oscilloscopio / logic analyzer
+
+Il pannello **Scope** usa la stessa mappa pin visibile sulla board STM32H7,
+non il fallback Arduino. I canali selezionabili sono:
+
+```text
+PA9 PA10 PA0 PA3 PA4 PA5 PA6 PA7 PB7 PB15
+PB8 PB9 PB10 PB11 PC0 PC1 PC2 PC3 PC13 PC14
+```
+
+Internamente questi pin usano la stessa codifica del `PinManager`:
+`PA0 = 0`, `PA15 = 15`, `PB0 = 16`, ..., `PC0 = 32`.
+Questo e' importante perche' gli eventi Renode arrivano come
+`stm32_gpio_change { port, pin, value }`, mentre il resto del frontend lavora
+con un singolo numero pin.
+
+Lo scope riceve campioni da due percorsi:
+
+- output firmware STM32H7, tramite `stm32_gpio_change` dal backend Renode
+- input esterni generati dal canvas, tramite `setPinState()` dello shim STM32H7
+
+Nel demo roundtrip conviene aggiungere `PA9` e `PA0`: `PA9` mostra il LED
+pilotato dal bottone LVGL, `PA0` mostra la pressione del pushbutton esterno.
+
+Limite noto: i timestamp STM32H7 sono basati sul tempo browser relativo alla
+creazione della bridge, non su cicli MCU. Lo scope e' quindi utile per
+transizioni lente e debug GPIO/logico, non per misure temporali fini o PWM
+veloce.
+
+### 8.9 Esecuzione da editor Velxio
 
 Il toolbar dell'editor supporta il workflow locale via File System Access API
 su Chrome/Edge:

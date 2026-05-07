@@ -96,6 +96,9 @@ porting:
   con `docs/examples/advanced_demo.py`
 - esempio roundtrip STM32H7 + LVGL + GPIO: bottone touch sul display pilota LED
   esterno su `PA9`, pushbutton esterno su `PA0` aggiorna label/bar LTDC
+- scope/logica aggiornato per STM32H7: picker con pin reali della board
+  (`PA9`, `PA0`, `PB8`, `PC13`, ecc.) e campioni per output Renode + input
+  generati dal canvas
 - pushbutton canvas robusto per cablaggi active-high (`3V3/5V`) e active-low
   (`GND`), senza scambiare i rail per GPIO reali
 - loader progetto e backend Renode resi piu' robusti contro il riuso immediato

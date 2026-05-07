@@ -21,6 +21,7 @@ import {
 import { useSimulatorStore } from '../../store/useSimulatorStore';
 import { BOARD_KIND_LABELS } from '../../types/board';
 import type { BoardKind } from '../../types/board';
+import { stm32EncodePin } from '../../utils/boardPinMapping';
 import './Oscilloscope.css';
 
 // Horizontal divisions shown at once
@@ -37,6 +38,32 @@ const TIME_DIV_OPTIONS: { label: string; ms: number }[] = [
   { label: '100 ms', ms: 100 },
   { label: '500 ms', ms: 500 },
 ];
+
+const STM32H7_SCOPE_PINS: { pin: number; label: string }[] = [
+  'PA9',
+  'PA10',
+  'PA0',
+  'PA3',
+  'PA4',
+  'PA5',
+  'PA6',
+  'PA7',
+  'PB7',
+  'PB15',
+  'PB8',
+  'PB9',
+  'PB10',
+  'PB11',
+  'PC0',
+  'PC1',
+  'PC2',
+  'PC3',
+  'PC13',
+  'PC14',
+].map((label) => {
+  const [, port, pin] = /^P([A-H])(\d+)$/.exec(label) ?? [];
+  return { pin: stm32EncodePin(port, Number(pin)), label };
+});
 
 /** Return the list of monitorable pins for a given board kind */
 function getPinsForBoardKind(boardKind: BoardKind): { pin: number; label: string }[] {
@@ -66,6 +93,8 @@ function getPinsForBoardKind(boardKind: BoardKind): { pin: number; label: string
       return Array.from({ length: 22 }, (_, i) => ({ pin: i, label: `GPIO${i}` }));
     case 'raspberry-pi-3':
       return Array.from({ length: 28 }, (_, i) => ({ pin: i, label: `GPIO${i}` }));
+    case 'stm32-h7-core-v13':
+      return STM32H7_SCOPE_PINS;
     default:
       // arduino-uno, arduino-nano
       return [

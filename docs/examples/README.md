@@ -26,7 +26,9 @@ Each example includes:
 
 The STM32H7 advanced demo is maintained as `advanced_demo.py`. The frontend
 imports the same program as the default `main.py` for a newly opened
-STM32H743 CORE V13 simulator.
+STM32H743 CORE V13 simulator. It defaults to double-buffer LTDC `direct`
+rendering in `RGB888`, which is currently the most reliable mode for this
+complex LVGL screen in Renode.
 
 The STM32H7 LED/Button Roundtrip demo is maintained as
 `stm32h7_led_button_roundtrip.py`. It validates both directions of the
@@ -41,6 +43,15 @@ now treats this as an active-high input. Wiring to `GND` remains active-low.
 The demo intentionally performs a single explicit initial render instead of a
 long warm-up loop, because repeated startup refreshes are visible on the
 Renode/LTDC path.
+
+STM32H7 scripts can override the LTDC mode before importing
+`display_driver`:
+
+```python
+LTDC_RENDER_MODE = "direct_single"  # lower touch/display latency
+LTDC_RENDER_MODE = "partial"        # dirty-rect rendering for simple RGB565 screens
+LTDC_PARTIAL_LINES = 200
+```
 
 The examples are defined in `frontend/src/data/examples.ts` and rendered in the `ExamplesGallery.tsx` gallery with category and difficulty filters.
 

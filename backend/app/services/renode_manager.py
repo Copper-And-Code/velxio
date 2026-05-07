@@ -120,6 +120,7 @@ _FB_MAX_WIDTH = int(os.environ.get(
     'VELXIO_STM32_FB_MAX_WIDTH',
     '0' if _FB_BINARY_TRANSPORT else '512',
 ))
+_FB_BAND_ROWS = max(1, int(os.environ.get('VELXIO_STM32_FB_BAND_ROWS', '16')))
 # Hard cap on framebuffer size we'll attempt to read (safety against bogus
 # register values pointing to a huge memcpy). 1024 × 600 × 4 = 2,457,600.
 _FB_MAX_BYTES = 4 * 1024 * 1024
@@ -257,8 +258,7 @@ class RenodeInstance:
         self._binary_warned: dict[str, bool] = {}
         self._binary_retry_after: dict[str, float] = {}
         self._mon_lock:      asyncio.Lock = asyncio.Lock()
-        self._fb_last_hash:  int = 0
-        self._fb_geometry_key: tuple[int, int, int, int, str, int] | None = None
+        self._fb_geometry_key: tuple[int, int, int, int, str, int, int] | None = None
         self._fb_rows: list[bytes] = []
         # Per-port last-seen ODR value, keyed by port letter ('A'/'B'/...).
         # Used by the GPIO poller to emit only on-edge transitions.
@@ -805,42 +805,6 @@ class RenodeManager:
             inst._binary_retry_after['touch'] = asyncio.get_running_loop().time() + 2.0
             return False
 
-    async def _read_framebuffer(self, inst: RenodeInstance,
-                                addr: int, width: int, height: int,
-                                pitch: int, bpp: int) -> tuple[bytes, int, int, int, int]:
-        """Read a framebuffer, optionally decimated for the browser preview.
-
-        Full-frame ReadBytes is the worst case for Renode's monitor: a single
-        huge command monopolises the monitor lock for many seconds. Scaled mode
-        reads one visible source row at a time and samples columns in Python,
-        so touch/GPIO commands can be serviced between row reads. The emitted
-        metadata keeps the original logical size available for touch mapping.
-        """
-        if _FB_MAX_WIDTH <= 0 or width <= _FB_MAX_WIDTH:
-            total = pitch * height
-            return await self._read_memory(inst, addr, total), width, height, pitch, 1
-
-        step = max(1, (width + _FB_MAX_WIDTH - 1) // _FB_MAX_WIDTH)
-        scaled_width = (width + step - 1) // step
-        scaled_height = (height + step - 1) // step
-        scaled_pitch = scaled_width * bpp
-        visible_row_bytes = width * bpp
-        out = bytearray(scaled_pitch * scaled_height)
-
-        dst_row = 0
-        for src_y in range(0, height, step):
-            row = await self._read_memory(
-                inst, addr + src_y * pitch, visible_row_bytes)
-            if len(row) < visible_row_bytes:
-                return b'', scaled_width, scaled_height, scaled_pitch, step
-            dst = dst_row * scaled_pitch
-            for dst_x, src_x in enumerate(range(0, width, step)):
-                src = src_x * bpp
-                out[dst + dst_x * bpp:dst + (dst_x + 1) * bpp] = row[src:src + bpp]
-            dst_row += 1
-
-        return bytes(out), scaled_width, scaled_height, scaled_pitch, step
-
     async def _poll_scaled_framebuffer(self, inst: RenodeInstance,
                                        addr: int, width: int, height: int,
                                        pitch: int, bpp: int, fmt: str) -> bool:
@@ -853,7 +817,7 @@ class RenodeManager:
         scaled_height = (height + step - 1) // step
         scaled_pitch = scaled_width * bpp
         visible_row_bytes = width * bpp
-        geometry_key = (width, height, pitch, bpp, fmt, step)
+        geometry_key = (width, height, pitch, bpp, fmt, step, 1)
         need_full = (
             inst._fb_geometry_key != geometry_key or
             len(inst._fb_rows) != scaled_height
@@ -861,7 +825,6 @@ class RenodeManager:
         if need_full:
             inst._fb_geometry_key = geometry_key
             inst._fb_rows = [b''] * scaled_height
-            inst._fb_last_hash = 0
 
         changed_rows: list[tuple[int, bytes]] = []
         for dst_row, src_y in enumerate(range(0, height, step)):
@@ -929,37 +892,134 @@ class RenodeManager:
                 run_rows.append(row_bytes)
                 prev_y = row_y
                 continue
-            await self._emit_framebuffer_patch(
+            await self._emit_framebuffer_patch_rows(
                 inst, run_y, run_rows, scaled_width, scaled_pitch,
                 width, height, pitch, step, fmt)
             run_y = row_y
             prev_y = row_y
             run_rows = [row_bytes]
-        await self._emit_framebuffer_patch(
+        await self._emit_framebuffer_patch_rows(
             inst, run_y, run_rows, scaled_width, scaled_pitch,
             width, height, pitch, step, fmt)
 
         return True
 
-    async def _emit_framebuffer_patch(self, inst: RenodeInstance,
-                                      y: int, rows: list[bytes],
-                                      scaled_width: int, scaled_pitch: int,
-                                      source_width: int, source_height: int,
-                                      source_pitch: int, scale: int,
-                                      fmt: str | None = None) -> None:
+    async def _poll_fullres_framebuffer_bands(self, inst: RenodeInstance,
+                                              addr: int, width: int, height: int,
+                                              pitch: int, bpp: int, fmt: str) -> bool:
+        """Poll full-resolution framebuffer in bands and emit changed patches.
+
+        We still need to scan the framebuffer to discover changes, but this
+        avoids sending and repainting a 1024x600 frame when LVGL only updates a
+        label, button, slider, or other small region. The first sample is a
+        full `framebuffer` event so the canvas has a complete baseline.
+        """
+        band_rows = min(_FB_BAND_ROWS, height)
+        band_count = (height + band_rows - 1) // band_rows
+        geometry_key = (width, height, pitch, bpp, fmt, 1, band_rows)
+        need_full = (
+            inst._fb_geometry_key != geometry_key or
+            len(inst._fb_rows) != band_count
+        )
+        if need_full:
+            inst._fb_geometry_key = geometry_key
+            inst._fb_rows = [b''] * band_count
+
+        changed_bands: list[tuple[int, int, bytes]] = []
+        for band_idx in range(band_count):
+            y = band_idx * band_rows
+            rows = min(band_rows, height - y)
+            data = await self._read_memory(inst, addr + y * pitch, pitch * rows)
+            if len(data) < pitch * rows:
+                return True
+
+            if need_full:
+                inst._fb_rows[band_idx] = data
+                continue
+            if data == inst._fb_rows[band_idx]:
+                continue
+
+            inst._fb_rows[band_idx] = data
+            changed_bands.append((y, rows, data))
+
+        if need_full:
+            await inst.emit('framebuffer', {
+                'width':         width,
+                'height':        height,
+                'pitch':         pitch,
+                'source_width':  width,
+                'source_height': height,
+                'source_pitch':  pitch,
+                'scale':         1,
+                'format':        fmt,
+                'bytes_b64': base64.b64encode(b''.join(inst._fb_rows)).decode('ascii'),
+            })
+            return True
+
+        if not changed_bands:
+            return True
+
+        changed_rows = sum(rows for _y, rows, _data in changed_bands)
+        if changed_rows > height // 2:
+            await inst.emit('framebuffer', {
+                'width':         width,
+                'height':        height,
+                'pitch':         pitch,
+                'source_width':  width,
+                'source_height': height,
+                'source_pitch':  pitch,
+                'scale':         1,
+                'format':        fmt,
+                'bytes_b64': base64.b64encode(b''.join(inst._fb_rows)).decode('ascii'),
+            })
+            return True
+
+        run_y, run_rows, run_data = changed_bands[0]
+        for y, rows, data in changed_bands[1:]:
+            if y == run_y + run_rows:
+                run_rows += rows
+                run_data += data
+                continue
+            await self._emit_framebuffer_patch_bytes(
+                inst, 0, run_y, width, run_rows, pitch,
+                width, height, pitch, 1, fmt, run_data)
+            run_y, run_rows, run_data = y, rows, data
+        await self._emit_framebuffer_patch_bytes(
+            inst, 0, run_y, width, run_rows, pitch,
+            width, height, pitch, 1, fmt, run_data)
+
+        return True
+
+    async def _emit_framebuffer_patch_rows(self, inst: RenodeInstance,
+                                           y: int, rows: list[bytes],
+                                           scaled_width: int, scaled_pitch: int,
+                                           source_width: int, source_height: int,
+                                           source_pitch: int, scale: int,
+                                           fmt: str | None = None) -> None:
+        await self._emit_framebuffer_patch_bytes(
+            inst, 0, y, scaled_width, len(rows), scaled_pitch,
+            source_width, source_height, source_pitch, scale, fmt,
+            b''.join(rows))
+
+    async def _emit_framebuffer_patch_bytes(self, inst: RenodeInstance,
+                                            x: int, y: int, width: int, height: int,
+                                            pitch: int, source_width: int,
+                                            source_height: int, source_pitch: int,
+                                            scale: int, fmt: str | None,
+                                            payload: bytes) -> None:
         fmt = fmt or 'rgb565'
         await inst.emit('framebuffer_patch', {
-            'x':             0,
+            'x':             x,
             'y':             y,
-            'width':         scaled_width,
-            'height':        len(rows),
-            'pitch':         scaled_pitch,
+            'width':         width,
+            'height':        height,
+            'pitch':         pitch,
             'source_width':  source_width,
             'source_height': source_height,
             'source_pitch':  source_pitch,
             'scale':         scale,
             'format':        fmt,
-            'bytes_b64': base64.b64encode(b''.join(rows)).decode('ascii'),
+            'bytes_b64': base64.b64encode(payload).decode('ascii'),
         })
 
     async def _poll_framebuffer_loop(self, inst: RenodeInstance) -> None:
@@ -1012,30 +1072,8 @@ class RenodeManager:
                     inst, fb_addr, width, height, pitch, bpp, fmt
                 ):
                     continue
-
-                buf, out_width, out_height, out_pitch, scale = (
-                    await self._read_framebuffer(
-                        inst, fb_addr, width, height, pitch, bpp)
-                )
-                if len(buf) < out_pitch * out_height:
-                    continue
-                # Cheap dup-frame suppression.
-                h = hash(buf)
-                if h == inst._fb_last_hash:
-                    continue
-                inst._fb_last_hash = h
-
-                await inst.emit('framebuffer', {
-                    'width':         out_width,
-                    'height':        out_height,
-                    'pitch':         out_pitch,
-                    'source_width':  width,
-                    'source_height': height,
-                    'source_pitch':  pitch,
-                    'scale':         scale,
-                    'format':        fmt,
-                    'bytes_b64': base64.b64encode(buf).decode('ascii'),
-                })
+                await self._poll_fullres_framebuffer_bands(
+                    inst, fb_addr, width, height, pitch, bpp, fmt)
             except asyncio.CancelledError:
                 raise
             except Exception as e:

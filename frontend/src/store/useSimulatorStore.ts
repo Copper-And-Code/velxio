@@ -239,10 +239,12 @@ class Stm32BridgeShim {
   onPinChangeWithTime: ((pin: number, state: boolean, timeMs: number) => void) | null = null;
   onBaudRateChange: ((baud: number) => void) | null = null;
   private bridge: Stm32H7Bridge;
+  private scopeStartMs: number;
 
-  constructor(bridge: Stm32H7Bridge, pm: PinManager) {
+  constructor(bridge: Stm32H7Bridge, pm: PinManager, scopeStartMs: number = performance.now()) {
     this.bridge = bridge;
     this.pinManager = pm;
+    this.scopeStartMs = scopeStartMs;
   }
 
   /**
@@ -255,6 +257,7 @@ class Stm32BridgeShim {
     if (pin < 0 || pin > 127) return;
     const { port, pin: idx } = stm32DecodePin(pin);
     this.bridge.setGpioInput(port, idx, state);
+    this.onPinChangeWithTime?.(pin, state, performance.now() - this.scopeStartMs);
   }
   getCurrentCycles(): number {
     return -1;
@@ -642,6 +645,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       } else if (boardKind === 'stm32-h7-core-v13') {
         const bridge = new Stm32H7Bridge(id);
         bridge.onSerialData = serialCallback;
+        const stm32ScopeStartMs = performance.now();
         // Bridge → PinManager: every ODR transition emitted by the backend
         // poll loop becomes an `onPinChange(num)` event, which is what
         // PartSimulationRegistry parts (LED.attachEvents, …) listen on.
@@ -649,8 +653,17 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         // onGpioChange slot, so Stm32H7Display can independently subscribe
         // without us racing each other on the same setter.
         bridge.addGpioListener((port, pin, state) => {
+          const encodedPin = stm32EncodePin(port, pin);
           const boardPm = pinManagerMap.get(id);
-          if (boardPm) boardPm.triggerPinChange(stm32EncodePin(port, pin), state);
+          if (boardPm) boardPm.triggerPinChange(encodedPin, state);
+
+          const { channels, pushSample } = useOscilloscopeStore.getState();
+          const timeMs = performance.now() - stm32ScopeStartMs;
+          for (const ch of channels) {
+            if (ch.boardId === id && ch.pin === encodedPin) {
+              pushSample(ch.id, timeMs, state);
+            }
+          }
         });
         // Framebuffer frames are consumed directly by Stm32H7Display via
         // getStm32Bridge(id) — no store fan-out (1024×600 frames at 5 fps).
@@ -658,8 +671,9 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         // Shim makes the board look like a "browser sim" to the rest of the
         // code: simulator.pinManager → pm, simulator.setPinState(num) →
         // bridge.setGpioInput(port, pin). DynamicComponent picks this up.
-        const shim = new Stm32BridgeShim(bridge, pm);
+        const shim = new Stm32BridgeShim(bridge, pm, stm32ScopeStartMs);
         shim.onSerialData = serialCallback;
+        shim.onPinChangeWithTime = getOscilloscopeCallback(id);
         simulatorMap.set(id, shim);
       } else {
         const sim = createSimulator(

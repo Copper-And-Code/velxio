@@ -2,6 +2,12 @@ import usys as sys
 
 sys.path.append("")  # See: https://github.com/micropython/micropython/issues/6419
 
+# STM32H7 LTDC render mode. This complex RGB888 demo is most reliable with
+# double-buffer DIRECT. `direct_single` can reduce latency on small demos, but
+# it causes visible tearing here; PARTIAL currently needs more driver work for
+# RGB888 before it is safe on this screen.
+LTDC_RENDER_MODE = "direct"
+
 # See: https://pymotw.com/2/sys/tracing.html
 
 # ── Custom LVGL indev driver — reads the Velxio touch mailbox ────────────
@@ -452,7 +458,7 @@ class AdvancedDemoApplication:
         #import touch_i2c
         import lv_utils
 
-        partial = False
+        render_mode = globals().get("LTDC_RENDER_MODE", "direct")
 
         if lv.is_initialized():
             lv.deinit()
@@ -479,11 +485,9 @@ class AdvancedDemoApplication:
         disp_drv = lv.display_create(panel.WIDTH, panel.HEIGHT)
         disp_drv.set_color_format(lv.COLOR_FORMAT.RGB888)
         disp.init(disp_drv)
-        if partial:
-            draw_buf1 = lv.draw_buf_create(panel.WIDTH, 50, lv.COLOR_FORMAT.RGB888, 0)
-            draw_buf2 = lv.draw_buf_create(panel.WIDTH, 50, lv.COLOR_FORMAT.RGB888, 0)
-            disp_drv.set_draw_buffers(draw_buf1, draw_buf2)
-            disp_drv.set_render_mode(lv.DISPLAY_RENDER_MODE.PARTIAL)
+        if render_mode == "direct_single":
+            buf1 = disp.framebuffer(1)
+            disp_drv.set_buffers(buf1, None, len(buf1), lv.DISPLAY_RENDER_MODE.DIRECT)
         else:
             buf1 = disp.framebuffer(1)
             buf2 = disp.framebuffer(2)

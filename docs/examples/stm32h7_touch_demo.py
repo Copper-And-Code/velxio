@@ -19,19 +19,17 @@ user_modules/lv_binding_micropython/driver/stm32/st_ltdc/ to recognise
 VERSION="VELXIO" and skip the GT911 touch init in Renode.
 """
 import lvgl as lv
+
+# Touch interactions benefit from lower latency more than from animation
+# stability, so ask display_driver for a single DIRECT framebuffer.
+LTDC_RENDER_MODE = "direct_single"
+
 import display_driver
 import stm
 import time
 
-# ── Single-buffer DIRECT mode ────────────────────────────────────────────
-# display_driver defaults to double-buffer DIRECT, but the Velxio backend
-# poller reads the buffer LTDC is currently scanning — which alternates
-# behind LVGL's back, making post-render updates invisible. With a single
-# buffer LTDC and LVGL share the same SDRAM region and every change is
-# immediately in the bytes the poller reads.
+# ── Display ───────────────────────────────────────────────────────────────
 disp_drv = lv.display_get_default()
-buf1 = display_driver.disp.framebuffer(1)
-disp_drv.set_buffers(buf1, None, len(buf1), lv.DISPLAY_RENDER_MODE.DIRECT)
 
 # ── Touch mailbox layout ─────────────────────────────────────────────────
 # Must match RenodeManager.TOUCH_MAILBOX in the backend.
