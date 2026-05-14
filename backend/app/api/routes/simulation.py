@@ -61,6 +61,11 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                          client_id, data.get('x', 0), data.get('y', 0),
                          data.get('width', 0), data.get('height', 0),
                          data.get('format', '?'), len(data.get('bytes_b64', '')))
+        elif event_type == 'display_stats':
+            logger.debug('[%s] display_stats polls=%s unchanged=%s full=%s patches=%s bytes=%s scan_ms=%s',
+                         client_id, data.get('polls', 0), data.get('unchanged', 0),
+                         data.get('full_frames', 0), data.get('patches', 0),
+                         data.get('bytes_sent', 0), data.get('scan_ms', 0))
         payload = json.dumps({'type': event_type, 'data': data})
         try:
             await manager.send(client_id, payload)

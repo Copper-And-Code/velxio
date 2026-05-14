@@ -103,6 +103,17 @@ porting:
   (`GND`), senza scambiare i rail per GPIO reali
 - loader progetto e backend Renode resi piu' robusti contro il riuso immediato
   dello stesso board id dopo load/stop/start
+- telemetria LTDC `display_stats` dal backend al frontend: poll completati,
+  frame completi, patch, righe mutate, byte inviati e tempo cumulativo di
+  scansione framebuffer, visibili come overlay compatto sul display STM32H7
+- patch full-resolution piu' piccole: il backend calcola il rettangolo
+  minimo cambiato dentro ogni banda LTDC invece di inviare sempre bande a
+  larghezza piena
+- poller LTDC risvegliato da touch/GPIO con finestra temporanea fast-poll
+  (`VELXIO_STM32_FB_FAST_POLL_MS`) per ridurre la latenza percepita degli
+  update interattivi
+- patch LTDC applicate lato frontend in batch per animation frame, evitando
+  repaint multipli del canvas quando un poll produce piu' rettangoli
 
 Il monitor testuale resta fallback di compatibilita'. Le note operative
 aggiornate stanno in [`STM32H7_MANUAL_TEST.md`](STM32H7_MANUAL_TEST.md).

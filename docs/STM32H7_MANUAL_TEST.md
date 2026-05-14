@@ -174,6 +174,8 @@ for _ in range(60):
 | Var                          | Default     | Descrizione                                    |
 |------------------------------|-------------|------------------------------------------------|
 | `VELXIO_STM32_FB_POLL_MS`    | `300`       | Cadenza di polling LTDC (ms)                   |
+| `VELXIO_STM32_FB_FAST_POLL_MS` | `80`      | Cadenza LTDC temporanea dopo touch/GPIO        |
+| `VELXIO_STM32_FB_FAST_WINDOW_MS` | `1200`  | Durata della finestra fast dopo input utente   |
 | `VELXIO_STM32_FB_FORMAT`     | auto da `L1PFCR` | Pixel format LTDC (override diagnostico)  |
 | `VELXIO_STM32_FB_MAX_WIDTH`  | `0` con binary, `512` senza | Larghezza massima preview LTDC; `0` = full-res |
 | `VELXIO_STM32_FB_BAND_ROWS`  | `16`        | Altezza delle bande full-res usate per diff/patch framebuffer |
@@ -340,8 +342,40 @@ Dopo il primo frame completo, il backend mantiene una cache del framebuffer.
 In preview scalata emette `framebuffer_patch` riga per riga quando il contenuto
 campionato cambia; in full-resolution legge il framebuffer a bande
 configurabili (`VELXIO_STM32_FB_BAND_ROWS`, default 16 righe) e invia solo le
-bande mutate. Il canvas viene aggiornato subito alla ricezione della patch,
-senza dover ricevere e decodificare ogni volta un frame 1024x600 completo.
+bande mutate. Per il path full-resolution il backend calcola anche il
+rettangolo orizzontale minimo cambiato dentro la banda: una label o una barra
+non costringono piu' a spedire 1024 pixel per ogni riga toccata. Il canvas
+viene aggiornato subito alla ricezione della patch, senza dover ricevere e
+decodificare ogni volta un frame 1024x600 completo.
+Il fallback a frame completo ora dipende dai byte che le patch invierebbero,
+non dal solo numero di righe cambiate: aggiornamenti stretti ma alti, come
+cursori o testo verticale, restano patch parziali.
+Il frontend accoda le patch arrivate nello stesso intervallo di rendering del
+browser e le applica al canvas con `requestAnimationFrame`, evitando piu'
+paint consecutivi quando un singolo poll produce vari rettangoli.
+
+La board STM32H7 nel canvas mostra anche una piccola telemetria LTDC in basso
+a sinistra dello schermo. I campi sono aggregati circa ogni secondo:
+
+| Campo | Significato |
+|-------|-------------|
+| `poll` | cicli di scansione LTDC completati nel backend |
+| `full` | frame completi inviati al frontend |
+| `patch` | patch parziali inviate al frontend |
+| `idle` / `Nr` | nessuna riga cambiata oppure numero di righe cambiate |
+| `kB` | payload raw inviato prima della codifica base64 |
+| `ms` | tempo cumulativo speso nella scansione framebuffer |
+| `300ms` | cadenza configurata da `VELXIO_STM32_FB_POLL_MS` |
+| formato | pixel format LTDC rilevato, ad esempio `rgb565` o `rgb888` |
+
+Questa telemetria distingue un problema di esempio LVGL (molte righe cambiate
+o frame completi frequenti) da un limite del trasporto Renode (pochi update ma
+tempo di scansione alto).
+
+Dopo un input touch o GPIO esterno il backend risveglia subito il poller e
+usa temporaneamente `VELXIO_STM32_FB_FAST_POLL_MS`. Questo riduce la latenza
+percepita click -> widget senza tenere il framebuffer in scansione veloce
+quando la UI e' ferma.
 
 Questa ottimizzazione riduce soprattutto WebSocket/base64/decode/canvas paint.
 Il backend deve comunque scansionare la SDRAM per scoprire cosa e' cambiato;

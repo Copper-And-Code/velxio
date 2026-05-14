@@ -334,6 +334,18 @@ npm run dev
 
 Open <http://localhost:5173>.
 
+After dependencies are installed, the root project can start both services with
+one command:
+
+```bash
+npm run dev
+```
+
+This starts the FastAPI backend from `backend/` on <http://127.0.0.1:8001> and
+the Vite frontend from `frontend/` on <http://localhost:5173>. Use `Ctrl-C` to
+stop both processes. Set `VELXIO_PYTHON=/path/to/python` if the backend should
+run with a specific virtualenv or Conda interpreter.
+
 **arduino-cli setup (first time):**
 
 ```bash

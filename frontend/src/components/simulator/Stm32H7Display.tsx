@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type {
+  Stm32DisplayStats,
   Stm32Framebuffer,
   Stm32FramebufferPatch,
   Stm32PixelFormat,
@@ -24,6 +25,7 @@ const PCB_GREEN = '#0d3a24';
 const PCB_DARK = '#082516';
 const SILK = '#d7eadc';
 const COPPER = '#c49b37';
+const DISPLAY_STATS_STORAGE_KEY = 'velxio:stm32-display-stats';
 
 interface Stm32PinSignal {
   type: string;
@@ -84,7 +86,11 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const framebufferRef = useRef<Stm32Framebuffer | null>(null);
+  const patchQueueRef = useRef<Stm32FramebufferPatch[]>([]);
+  const patchRafRef = useRef<number | null>(null);
   const [framebuffer, setFramebuffer] = useState<Stm32Framebuffer | null>(null);
+  const [displayStats, setDisplayStats] = useState<Stm32DisplayStats | null>(null);
+  const [showDisplayStats, setShowDisplayStats] = useState(readDisplayStatsPreference);
   // On-board LEDs (PB0 = red, PB1 = green) — wired in stm32h7_core_v13.repl
   // and lit by gpio_change events forwarded over the bridge. They give an
   // immediately visible signal that the GPIO transport is alive without
@@ -101,6 +107,10 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
     }
   }, []);
 
+  useEffect(() => {
+    writeDisplayStatsPreference(showDisplayStats);
+  }, [showDisplayStats]);
+
   // Subscribe to framebuffer + GPIO events from the active Stm32H7Bridge.
   // GPIO uses addGpioListener so the store's PinManager forwarder isn't
   // clobbered by us (and vice-versa). Framebuffer still uses the single
@@ -108,17 +118,40 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
   useEffect(() => {
     const bridge = getStm32Bridge(id);
     if (!bridge) return;
+    const drainPatchQueue = () => {
+      patchRafRef.current = null;
+      const canvas = canvasRef.current;
+      const patches = patchQueueRef.current.splice(0);
+      for (const patch of patches) {
+        framebufferRef.current = patch;
+        paintFramebufferPatch(canvas, patch);
+      }
+    };
+    const schedulePatchPaint = () => {
+      if (patchRafRef.current !== null) return;
+      patchRafRef.current = window.requestAnimationFrame(drainPatchQueue);
+    };
     const prevFb = bridge.onFramebuffer;
     const prevPatch = bridge.onFramebufferPatch;
+    const prevStats = bridge.onDisplayStats;
     bridge.onFramebuffer = (fb) => {
+      patchQueueRef.current = [];
+      if (patchRafRef.current !== null) {
+        window.cancelAnimationFrame(patchRafRef.current);
+        patchRafRef.current = null;
+      }
       framebufferRef.current = fb;
       setFramebuffer(fb);
       prevFb?.(fb);
     };
     bridge.onFramebufferPatch = (patch) => {
-      framebufferRef.current = patch;
-      paintFramebufferPatch(canvasRef.current, patch);
+      patchQueueRef.current.push(patch);
+      schedulePatchPaint();
       prevPatch?.(patch);
+    };
+    bridge.onDisplayStats = (stats) => {
+      setDisplayStats(stats);
+      prevStats?.(stats);
     };
     const unsubGpio = bridge.addGpioListener((port, pin, value) => {
       if (port === 'B' && pin === 0) setLedRed(value);
@@ -131,6 +164,14 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
       if (bridge.onFramebufferPatch && bridge.onFramebufferPatch !== prevPatch) {
         bridge.onFramebufferPatch = prevPatch;
       }
+      if (bridge.onDisplayStats && bridge.onDisplayStats !== prevStats) {
+        bridge.onDisplayStats = prevStats;
+      }
+      if (patchRafRef.current !== null) {
+        window.cancelAnimationFrame(patchRafRef.current);
+        patchRafRef.current = null;
+      }
+      patchQueueRef.current = [];
       unsubGpio();
     };
   }, [id]);
@@ -307,7 +348,36 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
             LTDC
           </div>
         )}
+        {displayStats && showDisplayStats && <DisplayStatsOverlay stats={displayStats} />}
       </div>
+      <button
+        type="button"
+        title={showDisplayStats ? 'Hide LTDC render stats' : 'Show LTDC render stats'}
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowDisplayStats((visible) => !visible);
+        }}
+        style={{
+          position: 'absolute',
+          right: 70,
+          top: 13,
+          width: 31,
+          height: 14,
+          border: '1px solid rgba(215, 234, 220, 0.28)',
+          borderRadius: 3,
+          background: showDisplayStats ? 'rgba(16, 75, 45, 0.9)' : 'rgba(8, 21, 13, 0.8)',
+          color: showDisplayStats ? '#c7f0d4' : '#78907f',
+          fontSize: 7,
+          fontFamily: 'monospace',
+          lineHeight: '12px',
+          padding: 0,
+          cursor: 'pointer',
+          pointerEvents: 'auto',
+          zIndex: 4,
+        }}
+      >
+        stats
+      </button>
       {/* Pin pads + labels */}
       {STM32H7_PINS.map((pin) => {
         const isTop = pin.y < SCREEN_Y;
@@ -459,6 +529,52 @@ const UsbConnector = ({ x, y }: { x: number; y: number }) => (
     />
   </div>
 );
+
+const DisplayStatsOverlay = ({ stats }: { stats: Stm32DisplayStats }) => {
+  const kb = stats.bytesSent / 1024;
+  const changed = stats.changedRows > 0 ? `${stats.changedRows}r` : 'idle';
+  return (
+    <div
+      title="STM32H7 LTDC render telemetry"
+      style={{
+        position: 'absolute',
+        left: 4,
+        bottom: 4,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, auto)',
+        gap: '3px 7px',
+        padding: '4px 5px',
+        borderRadius: 3,
+        background: 'rgba(0, 0, 0, 0.58)',
+        color: '#c7f0d4',
+        fontSize: 7,
+        fontFamily: 'monospace',
+        lineHeight: 1.15,
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}
+    >
+      <span>poll {stats.polls}</span>
+      <span>full {stats.fullFrames}</span>
+      <span>patch {stats.patches}</span>
+      <span>{changed}</span>
+      <span>{kb.toFixed(kb >= 100 ? 0 : 1)}kB</span>
+      <span>{stats.scanMs.toFixed(0)}ms</span>
+      <span>{stats.pollMs.toFixed(0)}ms</span>
+      <span>{stats.format}</span>
+    </div>
+  );
+};
+
+function readDisplayStatsPreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(DISPLAY_STATS_STORAGE_KEY) !== '0';
+}
+
+function writeDisplayStatsPreference(visible: boolean): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(DISPLAY_STATS_STORAGE_KEY, visible ? '1' : '0');
+}
 
 // Throttle table for `forwardTouch` so a fast drag doesn't flood the
 // backend monitor with WriteDoubleWord commands. ~30 Hz is enough for a

@@ -18,6 +18,7 @@
  *     { type: 'error',             data: { message: string } }
  *     { type: 'framebuffer',       data: { width, height, pitch, source_width?, source_height?, format, bytes_b64 } }
  *     { type: 'framebuffer_patch', data: { x, y, width, height, pitch, source_width?, source_height?, format, bytes_b64 } }
+ *     { type: 'display_stats',     data: { polls, unchanged, full_frames, patches, bytes_sent, changed_rows, scan_ms } }
  *     { type: 'stm32_gpio_change', data: { port: 'A'..'H', pin: 0..15, value: bool } }
  *
  * GPIO direction is one-shot per pin: outputs are observed by polling each
@@ -53,6 +54,20 @@ export interface Stm32FramebufferPatch extends Stm32Framebuffer {
   y: number;
 }
 
+export interface Stm32DisplayStats {
+  polls: number;
+  unchanged: number;
+  fullFrames: number;
+  patches: number;
+  bytesSent: number;
+  changedRows: number;
+  scanMs: number;
+  pollMs: number;
+  width: number;
+  height: number;
+  format: Stm32PixelFormat;
+}
+
 const API_BASE = (): string =>
   (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8001/api';
 
@@ -71,6 +86,7 @@ export class Stm32H7Bridge {
   onSystemEvent: ((event: string, data: Record<string, unknown>) => void) | null = null;
   onFramebuffer: ((fb: Stm32Framebuffer) => void) | null = null;
   onFramebufferPatch: ((patch: Stm32FramebufferPatch) => void) | null = null;
+  onDisplayStats: ((stats: Stm32DisplayStats) => void) | null = null;
 
   // GPIO subscribers as a Set so multiple consumers (the store's PinManager
   // forwarder + Stm32H7Display's on-board LED mirror) can listen without
@@ -219,6 +235,10 @@ export class Stm32H7Bridge {
           });
           break;
         }
+        case 'display_stats': {
+          this.onDisplayStats?.(Stm32H7Bridge._parseDisplayStats(msg.data));
+          break;
+        }
       }
     };
 
@@ -331,6 +351,22 @@ export class Stm32H7Bridge {
       scale: data.scale === undefined ? undefined : Number(data.scale) | 0,
       format: (data.format as Stm32PixelFormat) ?? 'rgb565',
       bytes,
+    };
+  }
+
+  private static _parseDisplayStats(data: Record<string, unknown>): Stm32DisplayStats {
+    return {
+      polls: Number(data.polls) | 0,
+      unchanged: Number(data.unchanged) | 0,
+      fullFrames: Number(data.full_frames) | 0,
+      patches: Number(data.patches) | 0,
+      bytesSent: Number(data.bytes_sent) | 0,
+      changedRows: Number(data.changed_rows) | 0,
+      scanMs: Number(data.scan_ms) || 0,
+      pollMs: Number(data.poll_ms) || 0,
+      width: Number(data.width) | 0,
+      height: Number(data.height) | 0,
+      format: (data.format as Stm32PixelFormat) ?? 'rgb565',
     };
   }
 
