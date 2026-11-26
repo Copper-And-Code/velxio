@@ -26,6 +26,17 @@ import { jsemuChipExamples } from './examples-jsemu-chips';
 import { stm32h7Examples } from './examples-stm32h7';
 import { studioStm32h7Examples } from './examples-studio-stm32h7';
 import { esp32_4848s040Examples } from './examples-esp32-4848s040';
+import { studioEsp32_4848s040Examples } from './examples-studio-esp32-4848s040';
+
+/**
+ * Studio apps for the ESP32-4848S040 that turn the WiFi station on as they start
+ * (cac_settings.station() at import) and wait there: the ESP32-S3 WiFi is not
+ * emulated yet on our QEMU's esp32s3-picsimlab. Out of the gallery until it is.
+ */
+export const ESP32_4848S040_WIFI_PENDING: ReadonlySet<string> = new Set([
+  'studio-esp32-4848s040-forecast',
+  'studio-esp32-4848s040-settings',
+]);
 import eeprom24c01C from '../components/customChips/examples/eeprom-24c01.c?raw';
 import eeprom24c01J from '../components/customChips/examples/eeprom-24c01.chip.json?raw';
 
@@ -12959,6 +12970,7 @@ export const exampleProjects: ExampleProject[] = [
   ...stm32h7Examples,
   ...studioStm32h7Examples,
   ...esp32_4848s040Examples,
+  ...studioEsp32_4848s040Examples.filter((e) => !ESP32_4848S040_WIFI_PENDING.has(e.id)),
 ];
 
 // Get examples by category

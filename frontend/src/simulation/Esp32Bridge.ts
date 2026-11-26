@@ -1181,6 +1181,10 @@ export class Esp32Bridge {
             // 800/200 is what this backend has been shipping.
             pokeDelayMs: 800,
             stageDelayMs: 200,
+            // Our QEMU's S3 UART (esp32s3-picsimlab) at its true baud rate takes
+            // bursts up to its 128-byte RX FIFO: 120 bytes a step, checked
+            // byte-exact, is ~2.3x the payload of the default 64.
+            ...(this.boardKind === 'esp32-4848s040' ? { burstBytes: 120 } : {}),
             onNotice: (line) => {
               for (const ch of line) this.onSerialData?.(ch, 0);
             },
