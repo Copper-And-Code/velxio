@@ -1,0 +1,17 @@
+# What scripts/fetch-prebuilt.sh downloads: kind, URL, SHA-256, destination
+# (relative to the repo). "tar" unpacks an archive's top directory into the
+# destination; "file" copies the file there.
+#
+# Each asset is a release of the public repository it is built from (the
+# source of a release is that repository at its tag):
+#   QEMU, ESP32 libraries + ROMs   Copper-And-Code/qemu-picsimlab      (velxio-s3)
+#   QEMU, RP2350 qemu-system-arm   Copper-And-Code/qemu-rp2040-pico    (rp2350)
+#   VELXIO firmwares               Copper-And-Code/copper-and-code-mcu-boards (velxio)
+# A new build: publish it there, then change its line here.
+
+tar  https://github.com/Copper-And-Code/qemu-picsimlab/releases/download/velxio-2026.11.26/velxio-qemu-esp32-velxio-2026.11.26-linux-x86_64.tar.gz  11007decde1b06b5530c0dcaa70fdf6d92bf30906627a502b4dd2b8afe43e698  prebuilt/qemu
+tar  https://github.com/Copper-And-Code/qemu-rp2040-pico/releases/download/velxio-2026.11.26/velxio-qemu-rp2350-velxio-2026.11.26-linux-x86_64.tar.gz  56e3efb79d8aa0d406e8ab80d7c39dc6a2fb325e1038e29c90edf2712dabad42  prebuilt/qemu
+
+file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/ESP32_4848S040-VELXIO-v0.1.8-24-g92363ea.bin  c5abfcc51e975ce03587266bef3867fbd48254204edce2fb161ec66b749e9a5d  frontend/public/firmware/micropython-esp32-4848s040-velxio.bin
+file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/WAVESHARE_RP2350_TOUCH_LCD_4-VELXIO-v0.1.8-24-g92363ea.uf2  08f9fb408b99001c01e40a53d2f387c9d19fc4b6f93a5b46fbc5fc4c62c5d38f  prebuilt/rp2350/waveshare-rp2350-lcd4-velxio.uf2
+file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/STM32H7_CORE-VELXIO-v0.1.8-24-g92363ea.elf  a3353259b59747e8ee1ac4175baf0bbb9871022148dc742188ef70ed4579089f  prebuilt/stm32h7/firmware.elf

@@ -18,6 +18,15 @@ This fork does not use Velxio's prebuilts: its QEMU binaries are built
 from two public trees, and the source of every binary in `prebuilt/qemu`
 is the branch named here.
 
+**To get them** (Linux x86_64): `scripts/fetch-prebuilt.sh`. It downloads
+the release assets pinned in `scripts/prebuilt.lock`, checks their SHA-256,
+and puts the QEMU files in `prebuilt/qemu/` and the VELXIO firmwares where
+the backend and the frontend look for them; run it before the dev servers
+or `docker build`. Each QEMU release is built by the `velxio-release`
+workflow of its repository (Debian container, so it loads on older
+distributions) when a `velxio-*` tag is pushed, and its source is that tag;
+the archive's `SOURCE.txt` names the commit.
+
 | Binary | Source | Branch | Build |
 |---|---|---|---|
 | `libqemu-xtensa.so`, `libqemu-riscv32.so` (ESP32, ESP32-C3, and ESP32-S3 with the `esp32s3-picsimlab` machine, its display and its WiFi) | [Copper-And-Code/qemu-picsimlab](https://github.com/Copper-And-Code/qemu-picsimlab), fork of `lcgamboa/qemu` | `velxio-s3` | `./build_libqemu-esp32.sh`; after a change, `./relink_libqemu.sh` |
