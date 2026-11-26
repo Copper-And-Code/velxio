@@ -10,8 +10,10 @@ import { blogUrlFor } from '../../i18n/path';
 import { trackVisitGitHub, trackVisitDiscord } from '../../utils/analytics';
 import { applyStripLayout, STRIP_BELOW_CLASS } from './headerStripFit';
 import './LanguageSwitcher.css';
+import { SOURCE_REPO_URL } from '../../fork/openBuild';
 
-const GITHUB_URL = 'https://github.com/davidmonterocrespo24/velxio';
+// The source of this build (AGPLv3 section 13), not upstream's: fork/openBuild.
+const GITHUB_URL = SOURCE_REPO_URL;
 const DISCORD_URL = 'https://discord.gg/3mARjJrh4E';
 
 interface AppHeaderProps {
@@ -202,6 +204,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ editorMenu, editorToolbar 
                 </a>
               </>
             )}
+            <Link to={localize('/credits')} className={'header-nav-link' + isActive('/credits')}>
+              {t('header.nav.credits', 'Credits')}
+            </Link>
             <a
               href={GITHUB_URL}
               target="_blank"

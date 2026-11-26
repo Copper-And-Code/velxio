@@ -10,6 +10,7 @@ import { ExamplesPage } from './pages/ExamplesPage';
 import { ExampleDetailPage } from './pages/ExampleDetailPage';
 import { ExampleEditorPage } from './pages/ExampleEditorPage';
 import { ImageToCodePage } from './pages/ImageToCodePage';
+import { CreditsPage } from './pages/CreditsPage';
 import { LocaleSync } from './i18n/LocaleSync';
 import { NON_DEFAULT_LOCALES } from './i18n/config';
 import { useProRoutes, useProRoutesSettled } from './lib/proRoutes';
@@ -57,6 +58,8 @@ const ROUTES: { path: string; element: ReactElement; index?: boolean }[] = [
   { path: 'example/:exampleId', element: <ExampleEditorPage /> },
   // Standalone tool: image to monochrome C byte array for OLED displays.
   { path: 'tools/image-to-code', element: <ImageToCodePage /> },
+  // This fork: credits, licenses and the link to its source (AGPLv3 s.13).
+  { path: 'credits', element: <CreditsPage /> },
   // Everything a VISITOR sees — landing, about, pricing, docs, the SEO
   // simulator landings, version showcases — moved to the pro overlay
   // (registerProRoutes, see pro pages/marketing). The OSS build is the

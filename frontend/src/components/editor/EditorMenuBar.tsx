@@ -36,6 +36,7 @@ import {
   type EditorCommandId,
 } from '../../lib/editorCommands';
 import './EditorMenuBar.css';
+import { SOURCE_REPO_URL } from '../../fork/openBuild';
 
 type Item =
   | {
@@ -59,7 +60,8 @@ type Item =
 // web editor mirrors that structure so both feel like one product. They
 // replace the marketing nav this header no longer shows, opening in a new
 // tab so the editor (and any unsaved work) stays put.
-const GITHUB_URL = 'https://github.com/davidmonterocrespo24/velxio';
+// The source of this build (AGPLv3 section 13), not upstream's: fork/openBuild.
+const GITHUB_URL = SOURCE_REPO_URL;
 const DISCORD_URL = 'https://discord.gg/3mARjJrh4E';
 // In the OSS build the marketing pages live on velxio.dev, not in this app
 // (the overlay registers them only in pro builds) — link absolute, exactly
@@ -197,6 +199,7 @@ export const EditorMenuBar: React.FC = () => {
     { kind: 'separator' },
     { kind: 'link', href: DISCORD_URL, label: t('editor.menu.discord', 'Discord Community') },
     { kind: 'link', href: GITHUB_URL, label: t('editor.menu.github', 'GitHub Repository') },
+    { kind: 'link', href: '/credits', label: t('editor.menu.credits', 'Credits and licenses') },
   ];
 
   // Undo/redo render specially above (live canvas history state); the rest

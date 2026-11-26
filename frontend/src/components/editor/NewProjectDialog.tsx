@@ -37,6 +37,7 @@ import type { ExampleProject } from '../../data/examples';
 import { ExampleThumbnail } from '../examples/ExampleThumbnail';
 import { trackSelectBoard } from '../../utils/analytics';
 import './NewProjectDialog.css';
+import { boardRunsHere } from '../../fork/openBuild';
 
 interface NewProjectDialogProps {
   isOpen: boolean;
@@ -341,7 +342,15 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({ isOpen, onCl
   );
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const sections = useMemo(() => buildStarterSections(listProBoards()), [proBoardsVersion]);
+  // The open build offers only boards that can start here (fork/openBuild).
+  const sections = useMemo(
+    () =>
+      buildStarterSections(listProBoards()).map((s) => ({
+        ...s,
+        entries: s.entries.filter((e) => boardRunsHere(e.kind)),
+      })),
+    [proBoardsVersion],
+  );
 
   useEffect(() => {
     if (!isOpen) return;

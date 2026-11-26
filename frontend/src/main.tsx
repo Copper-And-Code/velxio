@@ -34,6 +34,10 @@ import './components/velxio-components/Ds3231Element';
 import './components/velxio-components/GpsNeo6mElement';
 import './components/velxio-components/EPaperElement';
 import App from './App.tsx';
+import { installOpenBuildFilters } from './fork/openBuild';
+
+// This fork's open build lists only what can start without the pro overlay.
+installOpenBuildFilters();
 
 // Configure monaco-editor for offline use via local static assets
 const monacoVsPath = `${import.meta.env.BASE_URL}monaco/vs`;
