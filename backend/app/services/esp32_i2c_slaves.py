@@ -2244,3 +2244,87 @@ class I2CWriteSink:
                 self._emit(msg)
                 self._buf = []
             return 0
+
+
+class GT911Slave:
+    """Goodix GT911 capacitive touch controller (address 0x5D, 16-bit register
+    pointer, MSB first), as much of it as a driver reading one point needs:
+    the product id "911" at 0x8140, the resolution in the configuration at
+    0x8048-0x804B, the status at 0x814E (bit 7: a report is ready, bits 0-3:
+    points) and the first point at 0x8150 (x lo, x hi, y lo, y hi, size lo,
+    size hi). A report is ready at every change of the touch (`update`) and
+    once more at rest, and the driver's write of 0 to the status takes it, as
+    on the chip. Writes elsewhere are kept and read back.
+    """
+
+    REG_STATUS = 0x814E
+    REG_POINT1 = 0x8150
+
+    def __init__(self, addr: int = 0x5D, width: int = 480, height: int = 480):
+        self.addr = addr
+        self.regs: dict[int, int] = {}
+        for i, b in enumerate(b'911\x00'):
+            self.regs[0x8140 + i] = b
+        self.regs[0x8047] = 0x41  # configuration version
+        self.regs[0x8048], self.regs[0x8049] = width & 0xFF, width >> 8
+        self.regs[0x804A], self.regs[0x804B] = height & 0xFF, height >> 8
+        self.ptr = 0
+        self._ptr_bytes = 0
+        self.x = self.y = 0
+        self.pressed = False
+        self._ready = False
+        self._lock = _threading.Lock()
+        self.on_int_change = None
+
+    @staticmethod
+    def address_of(record: dict) -> int:
+        return int(record.get('addr', 0x5D))
+
+    def update(self, /, **inputs) -> None:
+        """x, y in panel pixels and pressed, from the canvas."""
+        with self._lock:
+            if 'x' in inputs:
+                self.x = max(0, int(inputs['x']))
+            if 'y' in inputs:
+                self.y = max(0, int(inputs['y']))
+            if 'pressed' in inputs:
+                self.pressed = bool(inputs['pressed'])
+            self._ready = True
+
+    def _read(self, reg: int) -> int:
+        if reg == self.REG_STATUS:
+            return (0x80 | (1 if self.pressed else 0)) if self._ready else 0
+        if self.REG_POINT1 <= reg < self.REG_POINT1 + 7:
+            point = (self.x & 0xFF, self.x >> 8, self.y & 0xFF, self.y >> 8, 0x20, 0, 0)
+            return point[reg - self.REG_POINT1]
+        if reg == self.REG_STATUS + 1:
+            return 0  # track id of point 1
+        return self.regs.get(reg, 0)
+
+    def handle_event(self, event: int) -> int:
+        op = event & 0xFF
+        data = (event >> 8) & 0xFF
+        with self._lock:
+            if op in (I2C_START_RECV, I2C_START_SEND):
+                if op == I2C_START_SEND:
+                    self._ptr_bytes = 0
+                return 0
+            if op == I2C_WRITE:
+                if self._ptr_bytes < 2:
+                    self.ptr = (self.ptr & 0xFF00) | data if self._ptr_bytes else data << 8
+                    self._ptr_bytes += 1
+                    return 0
+                if self.ptr == self.REG_STATUS:
+                    if data == 0:
+                        # The driver took the report; while pressed, the next
+                        # scan has one again (the chip reports at ~100 Hz).
+                        self._ready = self.pressed
+                else:
+                    self.regs[self.ptr] = data
+                self.ptr = (self.ptr + 1) & 0xFFFF
+                return 0
+            if op == I2C_READ:
+                value = self._read(self.ptr)
+                self.ptr = (self.ptr + 1) & 0xFFFF
+                return value
+            return 0  # FINISH, NACK: the pointer stays for a following read

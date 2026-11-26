@@ -119,6 +119,7 @@ try:
         DS1307Slave  as _DS1307Slave,
         DS3231Slave  as _DS3231Slave,
         I2CWriteSink as _I2CWriteSink,
+        GT911Slave as _GT911Slave,
         find_build_times as _find_build_times,
         rtc_slave as _rtc_slave,
         bmp280_slave as _bmp280_slave,
@@ -139,6 +140,7 @@ except ImportError:
     _DS1307Slave  = _mod.DS1307Slave   # type: ignore[assignment]
     _DS3231Slave  = _mod.DS3231Slave   # type: ignore[assignment]
     _I2CWriteSink = _mod.I2CWriteSink  # type: ignore[assignment]
+    _GT911Slave = _mod.GT911Slave  # type: ignore[assignment]
     _find_build_times = _mod.find_build_times  # type: ignore[assignment]
     _rtc_slave = _mod.rtc_slave  # type: ignore[assignment]
     _bmp280_slave = _mod.bmp280_slave  # type: ignore[assignment]
@@ -3266,6 +3268,14 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 _mpu_int_attach(sensor_data, slave, s)
                 sensor_data['i2c_addr'] = i2c_addr
                 sensor_data['slave'] = slave
+            elif sensor_type == 'gt911':
+                # A board's own touch panel (ESP32-4848S040): the canvas sends
+                # x, y and pressed as sensor_update.
+                i2c_addr = _GT911Slave.address_of(s)
+                slave = _GT911Slave(i2c_addr, int(s.get('width', 480)), int(s.get('height', 480)))
+                _i2c_add(gpio, s, slave, i2c_addr)
+                sensor_data['i2c_addr'] = i2c_addr
+                sensor_data['slave'] = slave
             elif sensor_type == 'bmp280':
                 i2c_addr = int(s.get('addr', 0x76))
                 # The part's compiled model when the record carries it
@@ -3706,7 +3716,7 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                         # Only what this update names: a value it leaves out
                         # stays where the record or an earlier update put it.
                         slave.update(**cmd)
-                    elif stype == 'bmp280' and slave is not None:
+                    elif stype in ('bmp280', 'gt911') and slave is not None:
                         # Only what this update names, as above.
                         slave.update(**cmd)
                     elif stype in ('ds1307', 'ds3231') and slave is not None:
