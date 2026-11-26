@@ -54,7 +54,9 @@ def readme_summary(folder: Path) -> str:
         paragraphs = [p.strip() for p in readme.read_text(encoding='utf-8').split('\n\n')]
         for p in paragraphs:
             if p and not p.startswith('#') and not p.startswith('!['):
-                return re.sub(r'\s+', ' ', re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', p))
+                p = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', p)  # [text](link) -> text
+                p = re.sub(r'(\*\*|__|`)', '', p)  # bold and code marks: the card shows plain text
+                return re.sub(r'\s+', ' ', p)
     return ''
 
 
