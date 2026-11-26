@@ -14,6 +14,16 @@ The examples are defined under `frontend/src/data/`:
 | Pure-analog labelled | `examples-analog.ts` | ~15 |
 | Pure-digital labelled | `examples-digital.ts` | ~7 |
 | Pico W WiFi | `examples-picow-wifi.ts` | ~4 |
+| STM32H743 Core: LVGL demos | `examples-stm32h7.ts` | 2 |
+| STM32H743 Core: Copper and Code Studio apps (generated) | `examples-studio-stm32h7.ts` | 7 |
+
+The Studio apps are generated: change a project in Copper and Code Studio, then run
+`python3 scripts/sync-studio-examples.py --studio <copper-and-code-studio>`. It takes
+every Studio example whose screen is 1024x600, runs Studio's board generator for the
+STM32H7_CORE V1.3, and writes its `app_main.py`, `ui.py`, `app_events.py`... plus a
+`main.py` that imports `app_main`. Velxio writes the modules onto the board's `/flash`
+(a littlefs in RAM in the VELXIO firmware) and runs `main.py`. Their thumbnails are
+captures of the running apps (`public/examples-thumbs/studio-<name>.webp`).
 
 > Totals are approximate — the lists grow regularly. The numbers above are the values at the last documentation refresh.
 

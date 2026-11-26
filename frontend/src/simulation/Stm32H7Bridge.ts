@@ -28,6 +28,7 @@
  */
 
 import { getTabSessionId } from './Stm32Bridge';
+import { MicroPythonSession, type MpyProgram } from './micropythonSession';
 
 export type Stm32PixelFormat =
   | 'rgb565'
@@ -81,11 +82,6 @@ const API_BASE = (): string => {
   return (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8001/api';
 };
 
-const RAW_PASTE_CHUNK_SIZE = 512;
-const RAW_PASTE_HANDSHAKE_TIMEOUT_MS = 2500;
-const SERIAL_BUFFER_MAX = 8192;
-const SERIAL_BUFFER_KEEP = 1024;
-
 export class Stm32H7Bridge {
   readonly boardId: string;
 
@@ -130,29 +126,13 @@ export class Stm32H7Bridge {
   private _connected = false;
   private firmwarePath: string | null = null;
 
-  // ── Raw-paste REPL injection (lv_micropython on STM32H7) ─────────────────
-  // Same 3-stage handshake as Esp32Bridge: wait for the friendly REPL banner,
-  // poke the UART to flush ">>> ", drop into raw REPL with Ctrl+A, then push
-  // the user's main.py and Ctrl+D to compile + execute. The board's flash
-  // filesystem is not mountable in Renode (no QSPI image), so this is the
-  // only way to get user code running short of rebuilding the firmware.
-  private _pendingMicroPythonCode: string | null = null;
-  private _serialBuffer = '';
-  private _replState:
-    | 'idle'
-    | 'banner_seen'
-    | 'prompt_seen'
-    | 'raw_repl_entered'
-    | 'raw_paste_starting'
-    | 'raw_paste_sending' = 'idle';
-  private _rawPasteBytes: number[] = [];
-  private _rawPasteOffset = 0;
-  private _rawPasteWindow = 0;
-  private _rawPasteWindowSize = 0;
-  private _rawPasteEofSent = false;
-  private _rawPasteFallbackCode = '';
-  private _rawPasteHandshakeTimer: number | null = null;
-  private _replTimers: number[] = [];
+  // ── Program upload (MicroPython on the STM32H7_CORE VELXIO firmware) ──────
+  // The same session as the ESP32 bridges (simulation/micropythonSession.ts):
+  // banner -> raw REPL -> each project file written onto /flash in bounded
+  // steps -> the program started. /flash is the firmware's littlefs in RAM
+  // (velxio_boot.py), since Renode cannot mount the QSPI flash.
+  private _pendingProgram: MpyProgram | null = null;
+  private _mpySession: MicroPythonSession | null = null;
 
   constructor(boardId: string, firmwarePath: string | null = null) {
     this.boardId = boardId;
@@ -164,14 +144,40 @@ export class Stm32H7Bridge {
   }
 
   /**
-   * Queue user MicroPython code for injection after the REPL boots.
-   * The state machine in onmessage will push it via raw REPL once it sees
-   * the banner. Call this BEFORE connect() (or before reset) so the bridge
-   * is armed when the first banner bytes arrive.
+   * Queue a MicroPython project for the next boot: `files` are written onto
+   * /flash, then `main` runs. Call it BEFORE connect(): the session follows the
+   * boot banner of the instance connect() starts.
    */
+  setPendingMicroPythonProgram(program: MpyProgram): void {
+    this._pendingProgram = program;
+    this._armSession();
+  }
+
+  /** A program with no other files. */
   setPendingMicroPythonCode(code: string): void {
-    this._resetReplInjection();
-    this._pendingMicroPythonCode = code;
+    this.setPendingMicroPythonProgram({ files: [], main: code });
+  }
+
+  private _armSession(): void {
+    this._mpySession?.dispose();
+    this._mpySession = this._pendingProgram
+      ? new MicroPythonSession((bytes) => this.sendSerialBytes(bytes), this._pendingProgram, {
+          tag: `Stm32H7Bridge:${this.boardId}`,
+          // Renode's UART, like QEMU's chardev, holds the prompt until
+          // something else writes: the QEMU bridge's timings.
+          pokeDelayMs: 800,
+          stageDelayMs: 200,
+          onNotice: (line) => {
+            for (const ch of line) this.onSerialData?.(ch);
+          },
+        })
+      : null;
+  }
+
+  private _disposeSession(): void {
+    this._mpySession?.dispose();
+    this._mpySession = null;
+    this._pendingProgram = null;
   }
 
   connect(): void {
@@ -207,11 +213,11 @@ export class Stm32H7Bridge {
       switch (msg.type) {
         case 'serial_output': {
           const text = (msg.data.data as string) ?? '';
+          // The session hides its own protocol chatter and passes the boot
+          // banner and the program's output through.
+          const shown = this._mpySession ? this._mpySession.feed(text) : text;
           if (this.onSerialData) {
-            for (const ch of text) this.onSerialData(ch);
-          }
-          if (this._pendingMicroPythonCode || this._replState !== 'idle') {
-            this._handleReplInjectionOutput(text);
+            for (const ch of shown) this.onSerialData(ch);
           }
           break;
         }
@@ -258,7 +264,7 @@ export class Stm32H7Bridge {
       if (this.socket !== socket) return;
       this._connected = false;
       this.socket = null;
-      this._resetReplInjection();
+      this._disposeSession();
       this.onDisconnected?.();
     };
 
@@ -275,7 +281,7 @@ export class Stm32H7Bridge {
       this.socket = null;
     }
     this._connected = false;
-    this._resetReplInjection();
+    this._disposeSession();
   }
 
   sendSerialByte(byte: number): void {
@@ -323,19 +329,6 @@ export class Stm32H7Bridge {
     });
   }
 
-  /**
-   * Strip non-ASCII from comments and normalise line endings so the
-   * MicroPython tokenizer doesn't choke (same caveats as ESP32: no wide
-   * unicode in identifiers/literals on these MCU builds).
-   */
-  private static _sanitizeForRepl(code: string): string {
-    let s = code.startsWith('﻿') ? code.slice(1) : code;
-    s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    s = s.replace(/^([ \t]*#.*)$/gm, (line) => line.replace(/[^\x00-\x7F]/g, '?'));
-    s = s.replace(/([ \t]+#.*)$/gm, (c) => c.replace(/[^\x00-\x7F]/g, '?'));
-    return s;
-  }
-
   private static _decodeBase64Bytes(b64: string): Uint8Array | null {
     try {
       const bin = atob(b64);
@@ -380,176 +373,6 @@ export class Stm32H7Bridge {
       height: Number(data.height) | 0,
       format: (data.format as Stm32PixelFormat) ?? 'rgb565',
     };
-  }
-
-  private _resetReplInjection(): void {
-    if (this._rawPasteHandshakeTimer !== null) {
-      clearTimeout(this._rawPasteHandshakeTimer);
-      this._rawPasteHandshakeTimer = null;
-    }
-    for (const timer of this._replTimers) clearTimeout(timer);
-    this._replTimers = [];
-    this._pendingMicroPythonCode = null;
-    this._serialBuffer = '';
-    this._replState = 'idle';
-    this._rawPasteBytes = [];
-    this._rawPasteOffset = 0;
-    this._rawPasteWindow = 0;
-    this._rawPasteWindowSize = 0;
-    this._rawPasteEofSent = false;
-    this._rawPasteFallbackCode = '';
-  }
-
-  private _handleReplInjectionOutput(text: string): void {
-    this._serialBuffer += text;
-
-    if (this._replState === 'idle' && this._serialBuffer.includes('Type "help()"')) {
-      this._replState = 'banner_seen';
-      this._scheduleReplAction(() => this.sendSerialBytes([0x0d]), 800);
-    }
-
-    if (this._replState === 'banner_seen' && this._serialBuffer.includes('>>>')) {
-      this._replState = 'prompt_seen';
-      this._serialBuffer = '';
-      this._scheduleReplAction(() => this.sendSerialBytes([0x01]), 200);
-    }
-
-    if (this._replState === 'prompt_seen' && this._serialBuffer.includes('raw REPL')) {
-      this._replState = 'raw_repl_entered';
-      const code = this._pendingMicroPythonCode;
-      this._pendingMicroPythonCode = null;
-      this._serialBuffer = '';
-      if (code !== null) this._scheduleReplAction(() => this._startRawPaste(code), 200);
-    }
-
-    if (this._replState === 'raw_paste_starting') {
-      this._handleRawPasteHandshake();
-    } else if (this._replState === 'raw_paste_sending') {
-      this._handleRawPasteAcks(text);
-    }
-
-    if (this._serialBuffer.length > SERIAL_BUFFER_MAX) {
-      this._serialBuffer = this._serialBuffer.slice(-SERIAL_BUFFER_KEEP);
-    }
-  }
-
-  private _handleRawPasteHandshake(): void {
-    const supportedAt = this._serialBuffer.indexOf('R\x01');
-    if (supportedAt >= 0 && this._serialBuffer.length >= supportedAt + 4) {
-      if (this._rawPasteHandshakeTimer !== null) {
-        clearTimeout(this._rawPasteHandshakeTimer);
-        this._rawPasteHandshakeTimer = null;
-      }
-      this._rawPasteWindow =
-        this._serialBuffer.charCodeAt(supportedAt + 2) |
-        (this._serialBuffer.charCodeAt(supportedAt + 3) << 8);
-      this._rawPasteWindowSize = this._rawPasteWindow || 128;
-      this._serialBuffer = '';
-      this._replState = 'raw_paste_sending';
-      this._pumpRawPaste();
-      return;
-    }
-
-    if (this._serialBuffer.includes('R\x00')) {
-      this._fallbackFromRawPaste();
-    }
-  }
-
-  private _handleRawPasteAcks(text: string): void {
-    for (let i = 0; i < text.length; i++) {
-      const byte = text.charCodeAt(i) & 0xff;
-      if (byte === 0x01) {
-        this._rawPasteWindow += this._rawPasteWindowSize;
-        this._pumpRawPaste();
-      }
-    }
-  }
-
-  private _fallbackFromRawPaste(): void {
-    if (this._rawPasteHandshakeTimer !== null) {
-      clearTimeout(this._rawPasteHandshakeTimer);
-      this._rawPasteHandshakeTimer = null;
-    }
-    const code = this._rawPasteFallbackCode;
-    this._serialBuffer = '';
-    this._sendCodeInRawReplFallback(code);
-  }
-
-  private _scheduleReplAction(action: () => void, delayMs: number): void {
-    const timer = window.setTimeout(() => {
-      this._replTimers = this._replTimers.filter((id) => id !== timer);
-      action();
-    }, delayMs);
-    this._replTimers.push(timer);
-  }
-
-  /**
-   * Enter MicroPython raw-paste mode. Unlike plain raw REPL, this is
-   * flow-controlled by the firmware using a small receive window, so large
-   * scripts keep their indentation and line boundaries intact.
-   */
-  private _startRawPaste(code: string): void {
-    const sanitized = Stm32H7Bridge._sanitizeForRepl(code);
-    this._rawPasteBytes = Array.from(new TextEncoder().encode(sanitized));
-    this._rawPasteOffset = 0;
-    this._rawPasteWindow = 0;
-    this._rawPasteWindowSize = 0;
-    this._rawPasteEofSent = false;
-    this._rawPasteFallbackCode = sanitized;
-    this._serialBuffer = '';
-    this._replState = 'raw_paste_starting';
-    this.sendSerialBytes([0x05, 0x41, 0x01]);
-    this._rawPasteHandshakeTimer = window.setTimeout(() => {
-      if (this._replState === 'raw_paste_starting') this._fallbackFromRawPaste();
-    }, RAW_PASTE_HANDSHAKE_TIMEOUT_MS);
-  }
-
-  private _pumpRawPaste(): void {
-    if (this._replState !== 'raw_paste_sending') return;
-
-    while (this._rawPasteWindow > 0 && this._rawPasteOffset < this._rawPasteBytes.length) {
-      const count = Math.min(
-        this._rawPasteWindow,
-        RAW_PASTE_CHUNK_SIZE,
-        this._rawPasteBytes.length - this._rawPasteOffset,
-      );
-      this.sendSerialBytes(
-        this._rawPasteBytes.slice(this._rawPasteOffset, this._rawPasteOffset + count),
-      );
-      this._rawPasteOffset += count;
-      this._rawPasteWindow -= count;
-    }
-
-    if (this._rawPasteOffset >= this._rawPasteBytes.length && !this._rawPasteEofSent) {
-      this._rawPasteEofSent = true;
-      this.sendSerialBytes([0x04]);
-      this._replState = 'idle';
-    }
-  }
-
-  /**
-   * Fallback for MicroPython builds without raw-paste support.
-   */
-  private _sendCodeInRawReplFallback(code: string): void {
-    const sanitized = Stm32H7Bridge._sanitizeForRepl(code);
-    const codeBytes = Array.from(new TextEncoder().encode(sanitized));
-    const CHUNK_SIZE = 16;
-    const CHUNK_DELAY_MS = 80;
-    let offset = 0;
-
-    const sendChunk = () => {
-      if (offset >= codeBytes.length) {
-        this._scheduleReplAction(() => {
-          this.sendSerialBytes([0x04]); // Ctrl+D → compile & execute
-          this._replState = 'idle';
-        }, 200);
-        return;
-      }
-      this.sendSerialBytes(codeBytes.slice(offset, offset + CHUNK_SIZE));
-      offset += CHUNK_SIZE;
-      this._scheduleReplAction(sendChunk, CHUNK_DELAY_MS);
-    };
-    sendChunk();
   }
 
   private _send(payload: unknown): void {

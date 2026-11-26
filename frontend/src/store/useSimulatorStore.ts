@@ -1424,11 +1424,15 @@ class Stm32H7BridgeShim {
   }
 
   /** Called by loadMicroPythonProgram (duck-typed): the firmware is already in
-   *  Renode, so the program is queued for raw-paste into the REPL at boot.
-   *  Only the entry point travels; other .py files are not written yet. */
+   *  Renode, so the project is queued for the boot: every other file is
+   *  written onto /flash, then main.py runs (simulation/micropythonSession.ts). */
   async loadMicroPython(files: Array<{ name: string; content: string }>): Promise<void> {
     const main = files.find((f) => f.name === 'main.py') ?? files[0];
-    if (main) this.bridge.setPendingMicroPythonCode(main.content);
+    if (!main) return;
+    this.bridge.setPendingMicroPythonProgram({
+      files: files.filter((f) => f !== main),
+      main: main.content,
+    });
   }
 
   /** Text from the serial monitor, one char per byte (latin-1, see serialWrite). */
