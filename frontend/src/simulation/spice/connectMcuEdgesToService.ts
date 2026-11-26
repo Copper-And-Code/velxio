@@ -30,7 +30,7 @@ import {
   getBoardSimulator,
 } from '../../store/useSimulatorStore';
 import { stm32LinearToPinName, stm32PinNameToLinear } from '../Stm32Bridge';
-import { isStm32BoardKind, isPiBoardKind } from '../../types/board';
+import { usesStm32PinNames, isPiBoardKind } from '../../types/board';
 import type { BoardKind } from '../../types/board';
 import { useElectricalStore } from '../../store/useElectricalStore';
 import { boardPinGroupFor } from './boardPinGroups';
@@ -66,7 +66,7 @@ export function connectMcuEdgesToService(service: CircuitSimulationService): () 
     // PinManager requested a full re-solve on EVERY mcu edge; now that the
     // full tick only fires on first classification, this fine-grained path
     // must actually cover STM32.
-    if (isStm32BoardKind(boardKind)) {
+    if (usesStm32PinNames(boardKind)) {
       return stm32LinearToPinName(arduinoPin);
     }
     // Raspberry Pi (Linux boards) wires use GPIO-style names like ESP32.
@@ -135,7 +135,7 @@ export function connectMcuEdgesToService(service: CircuitSimulationService): () 
     // 0..63 sweep with the reverse-mapped names.
     const listenPins: Array<{ pin: number; pinName: string }> = [];
     if (wanted.size > 0) {
-      const isStm32 = isStm32BoardKind(boardKind);
+      const isStm32 = usesStm32PinNames(boardKind);
       for (const pinName of wanted) {
         const pin = isStm32
           ? stm32PinNameToLinear(pinName)

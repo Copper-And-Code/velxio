@@ -273,6 +273,31 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application code
 COPY backend/app/ ./app/
 
+# ── STM32H743 Core (stm32h7-core-v13): Renode + MicroPython/LVGL firmware ──
+# app/services/renode_manager.py runs Renode headless with a prebuilt ELF, the
+# STM32H7_CORE VELXIO variant of Copper-And-Code/copper-and-code-mcu-boards
+# (scripts/build.sh stm32 STM32H7_CORE VELXIO), taken from
+# prebuilt/stm32h7/firmware.elf. Optional, like the QEMU files: without it the
+# image builds and the board answers "firmware not found" at Run.
+ARG RENODE_PORTABLE_URL=https://builds.renode.io/renode-latest.linux-portable.tar.gz
+RUN mkdir -p /opt/renode \
+    && curl -fSL "$RENODE_PORTABLE_URL" -o /tmp/renode.tar.gz \
+    && tar -xzf /tmp/renode.tar.gz -C /opt/renode --strip-components=1 \
+    && ln -sf /opt/renode/renode /usr/local/bin/renode \
+    && rm -f /tmp/renode.tar.gz \
+    && renode --version
+COPY renode/ ./renode/
+COPY prebuilt/stm32h7/ /app/lib/stm32h7/
+RUN if [ -f /app/lib/stm32h7/firmware.elf ]; then \
+      echo "[stm32h7] firmware.elf present"; \
+    else \
+      echo "[stm32h7] no prebuilt/stm32h7/firmware.elf: the STM32H743 Core board will not start"; \
+    fi
+ENV VELXIO_REPO_ROOT=/app \
+    RENODE_BIN=/usr/local/bin/renode \
+    STM32H7_CORE_FIRMWARE=/app/lib/stm32h7/firmware.elf \
+    VELXIO_STM32_PTY=0
+
 # The custom-chip SDK header. chip_compile.py passes this directory to clang
 # as -I, and reports available:false without it, so a chip that includes
 # velxio-chip.h cannot compile on an image that leaves it out.

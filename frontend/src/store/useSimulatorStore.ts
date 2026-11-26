@@ -42,7 +42,8 @@ import { PiBridgeShim } from '../simulation/PiBridgeShim';
 import { Esp32Bridge } from '../simulation/Esp32Bridge';
 import type { Ws2812Pixel } from '../simulation/Esp32Bridge';
 import { createEsp32Bridge } from '../simulation/Esp32BridgeFactory';
-import { Stm32Bridge, stm32PinNameToLinear } from '../simulation/Stm32Bridge';
+import { Stm32Bridge, stm32PinNameToLinear, stm32LinearToPinName } from '../simulation/Stm32Bridge';
+import { Stm32H7Bridge } from '../simulation/Stm32H7Bridge';
 import { STM32_LED } from '../components/velxio-components/Stm32BluePillElement';
 import { useEditorStore } from './useEditorStore';
 import { fingerprintSources } from '../utils/sourceFingerprint';
@@ -1387,6 +1388,91 @@ class Stm32BridgeShim {
  * simulator object is bound; a removed one is unbound. The fabric keeps its
  * devices either way (project board-buses-2026-09).
  */
+// ── STM32H743 Core in Renode (Stm32H7Bridge) ─────────────────────────────────
+// Not the QEMU STM32 lane above (isStm32BoardKind): MicroPython + LVGL firmware
+// prebuilt in the backend, GPIO, the REPL UART and the LTDC panel bridged, no
+// canvas bus devices. Pins are linear (port*16 + pin) like the QEMU STM32
+// kinds, so the netlist and the parts address them the same way.
+class Stm32H7BridgeShim {
+  // Inputs follow the solved circuit (connectDigitalInputsToMcu), as on the
+  // other boards: a button on PA0 reaches Renode through setPinState.
+  readonly spiceDrivenInputs = true;
+  pinManager: PinManager;
+  onSerialData: ((ch: string) => void) | null = null;
+  onPinChangeWithTime: ((pin: number, state: boolean, timeMs: number) => void) | null = null;
+  onBaudRateChange: ((baud: number) => void) | null = null;
+  private bridge: Stm32H7Bridge;
+
+  constructor(bridge: Stm32H7Bridge, pm: PinManager) {
+    this.bridge = bridge;
+    this.pinManager = pm;
+  }
+
+  /** The bridge stamps its edges with the page clock. */
+  scopeClockMs(): number {
+    return performance.now();
+  }
+
+  /** Drive a GPIO input from the circuit; `pin` is linear (port*16 + pin). */
+  setPinState(pin: number, state: boolean): void {
+    if (pin < 0 || pin > 127) return; // rails and unmapped pads
+    if (this.pinManager.getOutputPins().has(pin)) return; // the firmware drives it
+    const name = stm32LinearToPinName(pin); // 'PA0'
+    this.bridge.setGpioInput(name[1], pin % 16, state);
+    this.pinManager.triggerPinChange(pin, state, 'external');
+    this.onPinChangeWithTime?.(pin, state, performance.now());
+  }
+
+  /** Called by loadMicroPythonProgram (duck-typed): the firmware is already in
+   *  Renode, so the program is queued for raw-paste into the REPL at boot.
+   *  Only the entry point travels; other .py files are not written yet. */
+  async loadMicroPython(files: Array<{ name: string; content: string }>): Promise<void> {
+    const main = files.find((f) => f.name === 'main.py') ?? files[0];
+    if (main) this.bridge.setPendingMicroPythonCode(main.content);
+  }
+
+  /** Text from the serial monitor, one char per byte (latin-1, see serialWrite). */
+  serialWrite(text: string): void {
+    const bytes: number[] = [];
+    for (let i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xff);
+    this.bridge.sendSerialBytes(bytes);
+  }
+
+  sendSerialBytes(bytes: number[]): void {
+    this.bridge.sendSerialBytes(bytes);
+  }
+
+  getBridge(): Stm32H7Bridge {
+    return this.bridge;
+  }
+
+  // ── Lifecycle stubs (the store drives the bridge via getStm32H7Bridge) ──
+  start(): void {}
+  stop(): void {}
+  reset(): void {}
+  setSpeed(_s: number): void {}
+  getSpeed(): number {
+    return 1;
+  }
+  loadHex(_hex: string): void {}
+  loadBinary(_b64: string): void {}
+  isRunning(): boolean {
+    return this.bridge.connected;
+  }
+  getCurrentCycles(): number {
+    return -1;
+  }
+  getClockHz(): number {
+    return 480_000_000;
+  }
+  getADC(): null {
+    return null;
+  }
+  getMCU(): null {
+    return null;
+  }
+}
+
 class BusBoundSimulatorMap<V> extends Map<string, V> {
   set(id: string, sim: V): this {
     super.set(id, sim);
@@ -1445,6 +1531,7 @@ const simulatorMap = new BusBoundSimulatorMap<
   | Esp32C3Simulator
   | Esp32BridgeShim
   | Stm32BridgeShim
+  | Stm32H7BridgeShim
   | PiBridgeShim
 >();
 const pinManagerMap = new Map<string, PinManager>();
@@ -1458,6 +1545,8 @@ const bridgeMap = new Map<string, RaspberryPi3Bridge>();
 const esp32BridgeMap = new Map<string, Esp32Bridge>();
 // STM32 bridge — created lazily, only when isStm32BoardKind(boardKind).
 const stm32BridgeMap = new Map<string, Stm32Bridge>();
+// STM32H743 Core (Renode) bridges, by board id.
+const stm32h7BridgeMap = new Map<string, Stm32H7Bridge>();
 
 export const getBoardSimulator = (id: string) => simulatorMap.get(id);
 export const getBoardPinManager = (id: string) => pinManagerMap.get(id);
@@ -1618,6 +1707,7 @@ export function readCanvasSdCardImage(): Uint8Array | null {
 
 export const getEsp32Bridge = (id: string) => esp32BridgeMap.get(id);
 export const getStm32Bridge = (id: string) => stm32BridgeMap.get(id);
+export const getStm32H7Bridge = (id: string) => stm32h7BridgeMap.get(id);
 
 /** Set a board's WiFi status (used by the pro PIO peripheral to surface the
  *  Pico W's WiFi state into the canvas badge). */
@@ -1878,6 +1968,7 @@ interface SimulatorState {
     | Esp32C3Simulator
     | Esp32BridgeShim
     | Stm32BridgeShim
+    | Stm32H7BridgeShim
     | PiBridgeShim
     | null;
   /** @deprecated use getBoardPinManager(activeBoardId) */
@@ -2476,6 +2567,32 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       icReensureSerialHooks(id);
     } else if (isEsp32Kind(boardKind)) {
       wireEsp32Board(id, boardKind, pm);
+    } else if (boardKind === 'stm32h7-core-v13') {
+      const bridge = new Stm32H7Bridge(id);
+      bridge.onSerialData = serialCallback;
+      bridge.onError = makeRunRefusedHandler(id, boardKind, serialCallback, () =>
+        bridge.disconnect(),
+      );
+      const shim = new Stm32H7BridgeShim(bridge, pm);
+      shim.onPinChangeWithTime = getOscilloscopeCallback(id);
+      // The firmware's GPIO edges (backend ODR poll) reach the parts and the
+      // netlist through the PinManager, on the linear pin. addGpioListener
+      // and not the onGpioChange slot: Stm32H7Display listens too (its LEDs).
+      bridge.addGpioListener((port, pin, state) => {
+        const linear = stm32PinNameToLinear(`P${port}${pin}`);
+        if (linear < 0) return;
+        pinManagerMap.get(id)?.triggerPinChange(linear, state, 'mcu');
+        shim.onPinChangeWithTime?.(linear, state, performance.now());
+      });
+      bridge.onDisconnected = () => {
+        set((s) => {
+          const boards = s.boards.map((b) => (b.id === id ? { ...b, running: false } : b));
+          const isActive = s.activeBoardId === id;
+          return { boards, ...(isActive ? { running: false } : {}) };
+        });
+      };
+      stm32h7BridgeMap.set(id, bridge);
+      simulatorMap.set(id, shim);
     } else if (isStm32BoardKind(boardKind)) {
       const bridge = new Stm32Bridge(id, boardKind);
       // Onboard-LED pin + polarity per board kind. Blue/Black Pill drive PC13
@@ -3144,7 +3261,12 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       const seedMode = isPiBoardKind(boardKind) ? 'python' : 'arduino';
       useEditorStore
         .getState()
-        .createFileGroup(`group-${id}`, getBoardSeedFiles(boardKind, seedMode));
+        .createFileGroup(
+          `group-${id}`,
+          // The STM32H743 Core runs MicroPython only: its main.py demo.
+          getBoardSeedFiles(boardKind, seedMode) ??
+            (boardKind === 'stm32h7-core-v13' ? 'micropython' : undefined),
+        );
       // The seed sketch includes the board's vendor library, so declare it in
       // the board's manifest (= the compile resolution scope) right away.
       const seedLibs = getProBoard(boardKind)?.defaultLibraries;
@@ -3199,6 +3321,11 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       if (stm32Bridge) {
         stm32Bridge.disconnect();
         stm32BridgeMap.delete(boardId);
+      }
+      const stm32h7Bridge = getStm32H7Bridge(boardId);
+      if (stm32h7Bridge) {
+        stm32h7Bridge.disconnect();
+        stm32h7BridgeMap.delete(boardId);
       }
       // Detach the PIO peripheral (it disconnects its own bridge).
       const rpSim = getBoardSimulator(boardId);
@@ -4599,6 +4726,10 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
           esp32Bridge.connect();
         }
+      } else if (board.boardKind === 'stm32h7-core-v13') {
+        // Renode boots the prebuilt firmware; the program queued by
+        // loadMicroPythonProgram is pasted into the REPL once it is up.
+        getStm32H7Bridge(boardId)?.connect();
       } else if (isStm32BoardKind(board.boardKind)) {
         const stm32Bridge = getStm32Bridge(boardId);
         if (stm32Bridge) {
@@ -4704,6 +4835,8 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         getBoardSimulator(boardId)?.stop();
       } else if (isEsp32Kind(board.boardKind)) {
         getEsp32Bridge(boardId)?.disconnect();
+      } else if (board.boardKind === 'stm32h7-core-v13') {
+        getStm32H7Bridge(boardId)?.disconnect();
       } else if (isStm32BoardKind(board.boardKind)) {
         getStm32Bridge(boardId)?.disconnect();
       } else {

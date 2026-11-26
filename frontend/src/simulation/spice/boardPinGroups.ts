@@ -204,6 +204,13 @@ export const BOARD_PIN_GROUPS: Record<AllBoardKinds, BoardPinGroup> = {
   'stm32-olimex-h405': STM32_GROUP,
   'stm32-netduino-plus2': STM32_GROUP,
   'stm32-netduino2': STM32_GROUP,
+  // STM32H7_CORE V1.3: 3V3 and 5V on the top header, GND.1/GND.2
+  // (Stm32H7Display.STM32H7_PINS).
+  'stm32h7-core-v13': {
+    vcc: 3.3,
+    gnd: ['GND.1', 'GND.2', 'GND'],
+    vcc_pins: ['3V3', '5V', 'VCC'],
+  },
 
   // ADC_VREF is the ADC reference, the 3.3 V supply through a filter.
   // The RP2040's pins take IOVDD + 0.5 V at most (datasheet, absolute

@@ -22,6 +22,7 @@ import { digitalExamples } from '../data/examples-digital';
 import { hundredDaysExamples } from '../data/examples-100-days';
 import { epaperExamples } from '../data/examples-displays-epaper';
 import { circuitExamples } from '../data/examples-circuits';
+import { stm32h7Examples } from '../data/examples-stm32h7';
 import type { ExampleProject } from '../data/examples';
 
 const ALL_EXAMPLES: ExampleProject[] = [
@@ -30,6 +31,7 @@ const ALL_EXAMPLES: ExampleProject[] = [
   ...hundredDaysExamples,
   ...epaperExamples,
   ...circuitExamples,
+  ...stm32h7Examples,
 ];
 
 /**

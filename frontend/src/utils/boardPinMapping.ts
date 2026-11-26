@@ -306,6 +306,7 @@ export const BOARD_COMPONENT_IDS = [
   'stm32-olimex-h405',
   'stm32-netduino-plus2',
   'stm32-netduino2',
+  'stm32h7-core-v13',
   'attiny85',
 ];
 
@@ -597,8 +598,10 @@ export function boardPinToNumber(boardId: string, pinName: string): number | nul
 
   // STM32 Blue Pill (and family) — linear pin = port*16 + pin, matching the
   // backend (hw/arm/stm32_picsimlab.c) and Stm32Bridge.stm32PinNameToLinear.
-  // PA0..PA15=0..15, PB0..PB15=16..31, PC13..PC15=44..47.
-  if (boardId === 'stm32-bluepill' || boardId.startsWith('stm32-')) {
+  // PA0..PA15=0..15, PB0..PB15=16..31, PC13..PC15=44..47. The STM32H743 Core
+  // (Renode, Stm32H7Bridge) numbers its pins the same way.
+  // boardId is a kind or an instance id ('stm32h7-core-v13-2'): prefixes.
+  if (boardId.startsWith('stm32-') || boardId.startsWith('stm32h7-core-v13')) {
     // Power / reset pins — not GPIOs.
     if (
       pinName.startsWith('GND') || pinName.startsWith('3V3') ||

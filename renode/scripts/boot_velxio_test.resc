@@ -1,0 +1,29 @@
+:name: STM32H7_CORE VELXIO boot test headless
+:description: Headless boot test of VELXIO variant firmware (no USB no SDCARD).
+
+$bin?=@/opt/github/velxio/prebuilt/stm32h7/firmware.elf
+$uartlog?=@/opt/github/velxio/renode/logs/uart_velxio.log
+
+using sysbus
+mach create "h743_velxio"
+machine LoadPlatformDescription @/opt/github/velxio/renode/platforms/stm32h7_core_v13.repl
+
+logLevel 3
+logFile @/opt/github/velxio/renode/logs/renode_velxio.log true
+logLevel -1 sysbus.usart1
+
+sysbus.usart1 CreateFileBackend $uartlog true
+
+macro reset
+"""
+    cpu VectorTableOffset 0x08000000
+    sysbus LoadELF $bin
+"""
+runMacro $reset
+
+emulation RunFor "00:00:05"
+
+sysbus.cpu0 PC
+sysbus.cpu0 IsHalted
+
+quit

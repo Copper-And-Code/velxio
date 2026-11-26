@@ -18,7 +18,7 @@
  * the board does.
  */
 
-import type { BoardKind } from '../types/board';
+import { usesStm32PinNames, type BoardKind } from '../types/board';
 import { boardPinToNumber } from './boardPinMapping';
 import {
   getBoardPinFunctions,
@@ -197,7 +197,8 @@ const STM32_DEFAULT: RoleTable = {
 };
 
 function tableFor(boardKind: BoardKind | string): RoleTable | null {
-  if (boardKind === 'stm32-bluepill' || (boardKind as string).startsWith('stm32-')) return STM32_DEFAULT;
+  // The STM32H743 Core has the same USART1 on PA9/PA10 (its MicroPython REPL).
+  if (boardKind === 'stm32-bluepill' || usesStm32PinNames(boardKind)) return STM32_DEFAULT;
   if (boardKind === 'arduino-uno' || boardKind === 'arduino-nano') return ARDUINO_UNO;
   if (boardKind === 'arduino-mega') return ARDUINO_MEGA;
   if (boardKind === 'raspberry-pi-pico' || boardKind === 'pi-pico-w') return RP2040_DEFAULT;

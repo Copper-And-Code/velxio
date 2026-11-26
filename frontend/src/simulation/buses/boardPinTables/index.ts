@@ -58,6 +58,20 @@ export const OSS_BOARD_PIN_TABLES: Record<BoardKind, BoardPinFunctions> = {
   'raspberry-pi-3': BCM2835_TABLE,
   'raspberry-pi-4': BCM2711_TABLE,
   'raspberry-pi-5': RP1_TABLE,
+  // STM32H743 Core in Renode: only USART1 on PA9/PA10 (AF7), the MicroPython
+  // REPL, is bridged (with GPIO and the LTDC panel). Its other I2C/SPI/UART
+  // controllers have no canvas part behind them, so they are not listed.
+  'stm32h7-core-v13': {
+    routing: 'mux',
+    controllers: [{ bus: 'uart', unit: 0, name: 'USART1', defaultPins: { tx: 9, rx: 10 } }],
+    pins: {
+      9: [{ bus: 'uart', unit: 0, signal: 'tx' }],
+      10: [{ bus: 'uart', unit: 0, signal: 'rx' }],
+    },
+    source:
+      'RM0433/DS12110 (STM32H743) AF7 USART1 on PA9/PA10, the REPL UART of the ' +
+      'STM32H7_CORE VELXIO firmware (copper-and-code-mcu-boards); the only bus Renode bridges',
+  },
 };
 
 for (const [kind, table] of Object.entries(OSS_BOARD_PIN_TABLES)) {

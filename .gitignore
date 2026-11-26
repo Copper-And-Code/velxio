@@ -147,6 +147,11 @@ prebuilt/*
 !prebuilt/qemu/
 prebuilt/qemu/*
 !prebuilt/qemu/.gitkeep
+# STM32H743 Core (Renode): firmware.elf of the STM32H7_CORE VELXIO variant
+# (copper-and-code-mcu-boards), built locally, never committed.
+!prebuilt/stm32h7/
+prebuilt/stm32h7/*
+!prebuilt/stm32h7/.gitkeep
 
 # ESP32 build artifacts (ELF/MAP debug symbols — large, not needed for tests)
 test/esp32-emulator/**/*.elf

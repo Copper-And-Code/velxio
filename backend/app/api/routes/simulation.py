@@ -161,6 +161,14 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                     else:
                         esp_qemu_manager.load_firmware(client_id, firmware_b64)
 
+            # ── STM32H7_CORE in Renode (app/services/stm32h7_renode.py) ──
+            # Not the QEMU STM32 lane above: its own `stm32h7_` messages,
+            # handled through the same extension hook.
+            elif msg_type.startswith('stm32h7_'):
+                await dispatch_ws_sim_message(
+                    websocket, client_id, msg_type, msg_data, qemu_callback,
+                )
+
             # ── Pico W (CYW43439) WiFi bridge — overlay-provided ─────────
             # The chip-side gSPI emulator lives in the frontend; the userspace
             # network stack AND the paid-plan gate live in the velxio-prod

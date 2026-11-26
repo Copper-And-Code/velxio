@@ -147,6 +147,7 @@ const BOARD_PILL_ICON: Record<BoardKind, string> = {
   'stm32-olimex-h405': '◈',
   'stm32-netduino-plus2': '◈',
   'stm32-netduino2': '◈',
+  'stm32h7-core-v13': '▣',
 };
 
 const BOARD_PILL_COLOR: Record<BoardKind, string> = {
@@ -168,6 +169,7 @@ const BOARD_PILL_COLOR: Record<BoardKind, string> = {
   'stm32-olimex-h405': 'var(--color-feedback-success)',
   'stm32-netduino-plus2': '#ce93d8',
   'stm32-netduino2': '#ce93d8',
+  'stm32h7-core-v13': '#90caf9',
 };
 
 export const EditorToolbar = ({

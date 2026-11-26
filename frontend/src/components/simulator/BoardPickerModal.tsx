@@ -26,6 +26,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'esp32-c3': 'RISC-V single-core, WiFi+BLE, 22 GPIO (QEMU)',
   'stm32-bluepill': 'STM32F103C8 Cortex-M3, 64KB flash, 37 GPIO (QEMU)',
   'stm32-blackpill': 'STM32F411CE Cortex-M4, 512KB flash, 50 GPIO (QEMU)',
+  'stm32h7-core-v13': 'STM32H743 Cortex-M7, 32MB SDRAM, 1024×600 LTDC, MicroPython + LVGL (Renode)',
 };
 
 const BOARD_ICON: Record<BoardKind, string> = {
@@ -41,6 +42,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
   'esp32-c3': '⬡',
   'stm32-bluepill': '◈',
   'stm32-blackpill': '◈',
+  'stm32h7-core-v13': '▣',
 };
 
 interface BoardPickerModalProps {
@@ -62,6 +64,7 @@ const BOARDS: BoardKind[] = [
   'esp32-c3',
   'stm32-bluepill',
   'stm32-blackpill',
+  'stm32h7-core-v13',
 ];
 
 export const BoardPickerModal = ({ isOpen, onClose, onSelectBoard }: BoardPickerModalProps) => {

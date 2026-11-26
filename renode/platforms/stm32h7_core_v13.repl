@@ -1,0 +1,45 @@
+// STM32H7_CORE V13 (Aliexpress) — Velxio Renode platform
+// Estende il modello CPU H743 ufficiale aggiungendo i peripherals on-board V13:
+//   - LED rosso PB0, LED verde PB1
+//   - User switch PA1
+// Touch GT911 (soft I2C su PB12/PB13) e display LTDC vengono collegati
+// in fase successiva (fase 3 della roadmap).
+
+using "platforms/cpus/stm32h743.repl"
+
+// 32 MB SDRAM esterna (FMC bank 1, SDNE0) — già definita in stm32h743.repl
+// come `sdramBank1: Memory.MappedMemory @ sysbus 0xC0000000 size: 0x10000000`.
+// Non serve ridichiararla.
+
+ledRed: Miscellaneous.LED @ gpioPortB 0
+
+ledGreen: Miscellaneous.LED @ gpioPortB 1
+
+userButton: Miscellaneous.Button @ gpioPortA 1
+    -> gpioPortA@1
+
+gpioPortB:
+    0 -> ledRed@0
+    1 -> ledGreen@0
+
+// PWR controller — H7 firmware polls voltage-scaling-ready bits at boot.
+// The CPU model in stm32h743.repl tags the PWR region but returns 0,
+// causing infinite poll loops. Force-set the ready bits.
+sysbus:
+    init:
+        Tag <0x58024800 4> "PWR_CR1"   0x00000100
+        Tag <0x58024804 4> "PWR_CSR1"  0x00002000
+        Tag <0x58024808 4> "PWR_CR2"   0x00000001
+        Tag <0x58024818 4> "PWR_D3CR"  0x00006000
+
+// QSPI flash — W25Q128 (16 MB) on board V13 (CS=PB6 SCK=PB2 IO0..3=PF8/9/7/6).
+// Without a slave device, STM32H7_QuadSPI throws NRE on transfer trigger.
+qspiFlashMemory: Memory.MappedMemory @ sysbus 0x90000000
+    size: 0x1000000
+
+qspiFlash: SPI.GenericSpiFlash @ qspi
+    underlyingMemory: qspiFlashMemory
+    manufacturerId: 0xEF
+    memoryType: 0x40
+    extendedDeviceId: 0x00
+    capacityCode: 0x18

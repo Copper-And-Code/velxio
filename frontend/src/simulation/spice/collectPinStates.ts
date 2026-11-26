@@ -10,7 +10,7 @@
 import { getBoardPinManager } from '../../store/useSimulatorStore';
 import type { PinSourceState } from './types';
 import type { BoardKind } from '../../types/board';
-import { isStm32BoardKind } from '../../types/board';
+import { usesStm32PinNames } from '../../types/board';
 import { stm32PinNameToLinear } from '../Stm32Bridge';
 import { boardPinGroupFor } from './boardPinGroups';
 import { boardPinToNumber } from '../../utils/boardPinMapping';
@@ -112,7 +112,7 @@ export function collectPinStates(
   // (lianqi 07-23, emulation-gaps F3). Now that the name mapping is right,
   // stamp outputs as V sources exactly like every other board; inputs still
   // contribute only their internal pull.
-  const isStm32 = isStm32BoardKind(boardKind);
+  const isStm32 = usesStm32PinNames(boardKind);
   if (isStm32) {
     for (const pinName of pinNames) {
       const linear = stm32PinNameToLinear(pinName);

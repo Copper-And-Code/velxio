@@ -37,7 +37,7 @@
 import { useSimulatorStore, getBoardSimulator, getBoardPinManager } from '../../store/useSimulatorStore';
 import { isPartOwnedPin } from '../partPinOwnership';
 import { useElectricalStore } from '../../store/useElectricalStore';
-import { isStm32BoardKind } from '../../types/board';
+import { usesStm32PinNames } from '../../types/board';
 import type { BoardKind } from '../../types/board';
 import { stm32PinNameToLinear } from '../Stm32Bridge';
 import { boardPinToNumber } from '../../utils/boardPinMapping';
@@ -89,7 +89,7 @@ export function connectDigitalInputsToMcu(): () => void {
       const { rise: vHigh, fall: vLow } = boardInputSwitch(board.boardKind);
       // STM32 names pins PA0/PC13/… and its PinManager + setPinState key on the
       // linear pin (port*16+pin); every other board uses plain GPIO numbers.
-      const isStm32 = isStm32BoardKind(board.boardKind);
+      const isStm32 = usesStm32PinNames(board.boardKind);
       for (const [key, net] of pinNetMap) {
         if (!key.startsWith(prefix)) continue;
         const pinName = key.slice(prefix.length);

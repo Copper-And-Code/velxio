@@ -141,6 +141,11 @@ try:
 except ImportError:
     pass
 
+# STM32H7_CORE in Renode (open source, unlike the QEMU board lane below): its
+# simulation-WS messages and teardown, through the same hooks.
+from app.services import stm32h7_renode
+stm32h7_renode.register()
+
 # Optional QEMU board lane. Same extension pattern as `app.pro` above, but a
 # separate package on purpose: the emulators for the paid board families
 # (Raspberry Pi Linux, STM32) ship to velxio.dev AND to Velxio Desktop, while

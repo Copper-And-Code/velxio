@@ -30,6 +30,10 @@ export type BoardKind =
   | 'stm32-olimex-h405' // Olimex STM32-H405 (F405RG, Cortex-M4), QEMU
   | 'stm32-netduino-plus2' // Netduino Plus 2 (F405, Cortex-M4), QEMU
   | 'stm32-netduino2' // Netduino 2 (F205, Cortex-M3), QEMU (serial until F205 GPIO wired)
+  // STM32H743 Core V1.3 (1024x600 LTDC), MicroPython + LVGL (copper-and-code-mcu-boards
+  // VELXIO variant) in Renode. Deliberately not `stm32-…`: isStm32BoardKind() is the
+  // QEMU STM32 lane, which this board is not part of.
+  | 'stm32h7-core-v13'
   | 'attiny85'; // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython' | 'espidf';
@@ -60,6 +64,14 @@ export function isStm32BoardKind(kind: BoardKind | string): boolean {
   return typeof kind === 'string' && kind.startsWith('stm32-');
 }
 
+/** True for every board whose pads are named PA0/PC13 and whose PinManager is
+ *  keyed on the linear pin (port*16 + pin): the QEMU STM32 kinds and the
+ *  STM32H743 Core in Renode. Pin naming only — which backend runs the board is
+ *  isStm32BoardKind's question, and the H7 is not on that lane. */
+export function usesStm32PinNames(kind: BoardKind | string): boolean {
+  return isStm32BoardKind(kind) || kind === 'stm32h7-core-v13';
+}
+
 export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'raspberry-pi-pico',
   'pi-pico-w',
@@ -76,6 +88,8 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'esp32-c3',
   'xiao-esp32-c3',
   'aitewinrobot-esp32c3-supermini',
+  // STM32H743 Core (Renode bridge): the firmware is MicroPython, there is no Arduino toolchain
+  'stm32h7-core-v13',
 ]);
 
 /** Boards that can run pure ESP-IDF projects (app_main entry point, IDF
@@ -284,6 +298,7 @@ export const BOARD_KIND_LABELS: Record<BoardKind, string> = {
   'stm32-olimex-h405': 'Olimex STM32-H405',
   'stm32-netduino-plus2': 'Netduino Plus 2',
   'stm32-netduino2': 'Netduino 2',
+  'stm32h7-core-v13': 'STM32H743 Core V1.3 (1024×600 LTDC)',
   attiny85: 'ATtiny85',
 };
 
@@ -324,6 +339,8 @@ export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
   'stm32-olimex-h405': 'STMicroelectronics:stm32:GenF4:pnum=GENERIC_F405RGTX',
   'stm32-netduino-plus2': 'STMicroelectronics:stm32:GenF4:pnum=GENERIC_F405RGTX',
   'stm32-netduino2': 'STMicroelectronics:stm32:GenF2:pnum=GENERIC_F205RGTX',
+  // MicroPython only: the firmware is prebuilt, nothing is compiled.
+  'stm32h7-core-v13': null,
   attiny85: 'ATTinyCore:avr:attinyx5:chip=85,clock=16pll',
 };
 
@@ -469,6 +486,8 @@ export const BOARD_ONBOARD_LEDS: Record<BoardKind, readonly OnboardLed[]> = {
   'stm32-olimex-h405': NO_ONBOARD_LED,
   'stm32-netduino-plus2': NO_ONBOARD_LED,
   'stm32-netduino2': NO_ONBOARD_LED,
+  // Its LEDs (PB0 red, PB1 green) are GPIO events of the Renode bridge.
+  'stm32h7-core-v13': NO_ONBOARD_LED,
   // PB1, the Digispark convention; the bare DIP-8 element draws no LED and
   // examples wire a real one to PB1.
   attiny85: [{ id: 'led', kind: 'gpio', pin: 1, activeLow: false }],

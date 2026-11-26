@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { generateUUID } from '../utils/uuid';
 import { isPiBoardKind } from '../types/board';
 import { getProBoard } from '../lib/proBoardRegistry';
+// The STM32H743 Core's starting main.py (LVGL demo on its 1024x600 panel).
+import STM32H7_DEMO_CONTENT from '../data/stm32-advanced-demo.py?raw';
 
 export interface WorkspaceFile {
   id: string;
@@ -512,9 +514,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           groupId.includes('esp32') ||
           getProBoard(boardIdPart)?.esp32Family !== undefined ||
           getProBoard(boardIdPart.replace(/-\d+$/, ''))?.esp32Family !== undefined;
+        const isStm32h7 = boardIdPart.startsWith('stm32h7-core-v13');
         if (languageMode === 'espidf') {
           fileName = 'main.c';
           content = DEFAULT_ESPIDF_CONTENT;
+        } else if (isMicroPython && isStm32h7) {
+          fileName = 'main.py';
+          content = STM32H7_DEMO_CONTENT;
         } else if (isMicroPython && isEsp32) {
           fileName = 'main.py';
           content = DEFAULT_ESP32_MICROPYTHON_CONTENT;

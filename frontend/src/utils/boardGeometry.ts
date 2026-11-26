@@ -62,6 +62,9 @@ export const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'stm32-olimex-h405': { w: 158, h: 196 }, // 12 rows per side
   'stm32-netduino-plus2': { w: 158, h: 196 }, // 12 rows per side
   'stm32-netduino2': { w: 158, h: 196 }, // 12 rows per side
+  // PCB frame around the 1024x600 LTDC panel at 0.4 scale, 12 header pins on
+  // top and 12 at the bottom (Stm32H7Display).
+  'stm32h7-core-v13': { w: 470, h: 348 },
   attiny85: { w: 160, h: 132 },
 };
 
