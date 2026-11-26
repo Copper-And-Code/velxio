@@ -1729,6 +1729,8 @@ const ESP32_KINDS = new Set<BoardKind>([
   'esp32-s3',
   'xiao-esp32-s3',
   'arduino-nano-esp32',
+  // ESP32-S3 panel board on our QEMU (esp32s3-picsimlab, backend esp32_lib_manager)
+  'esp32-4848s040',
 ]);
 
 // RISC-V ESP32 boards — also use QEMU bridge (qemu-system-riscv32 -M esp32c3)

@@ -319,6 +319,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
   'stm32-netduino-plus2': '◈',
   'stm32-netduino2': '◈',
   'stm32h7-core-v13': '▣',
+  'esp32-4848s040': '▣',
 };
 
 // Color accent per board family
@@ -340,6 +341,7 @@ const BOARD_COLOR: Record<BoardKind, string> = {
   'stm32-netduino-plus2': '#ce93d8',
   'stm32-netduino2': '#ce93d8',
   'stm32h7-core-v13': '#90caf9',
+  'esp32-4848s040': 'var(--color-feedback-success)',
 };
 
 /** A web page: the file outline with a pair of code brackets. */

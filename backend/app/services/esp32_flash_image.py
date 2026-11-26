@@ -26,15 +26,18 @@ _VALID_FLASH_SIZES = [s * 1024 * 1024 for s in (2, 4, 8, 16)]
 _MIN_FLASH_BYTES = 4 * 1024 * 1024
 
 
-def pad_to_flash_size(fw_bytes: bytes) -> bytes:
-    """Pad `fw_bytes` with 0xFF up to the next valid QEMU flash size.
+def pad_to_flash_size(fw_bytes: bytes, min_bytes: int = 0) -> bytes:
+    """Pad `fw_bytes` with 0xFF up to the next valid QEMU flash size, and to
+    at least `min_bytes`: a board whose partition table spans a bigger flash
+    (the ESP32-4848S040's 16 MB) is sent compact and grown here, since the
+    whole image would not fit a WebSocket message.
 
     Returns the input unchanged when it's already at or above a valid size.
     Raises `ValueError` if the firmware exceeds the largest size we accept
     (16 MB) — at that point something is wrong with the upstream merge.
     """
     target = next(
-        (s for s in _VALID_FLASH_SIZES if s >= max(len(fw_bytes), _MIN_FLASH_BYTES)),
+        (s for s in _VALID_FLASH_SIZES if s >= max(len(fw_bytes), _MIN_FLASH_BYTES, min_bytes)),
         None,
     )
     if target is None:

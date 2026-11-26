@@ -55,7 +55,9 @@ import { generateUUID } from '../utils/uuid';
  * Map any ESP32-family board kind to the 3 base QEMU machine types understood
  * by the backend esp_qemu_manager.
  */
-export function toQemuBoardType(kind: BoardKind): 'esp32' | 'esp32-s3' | 'esp32-c3' | 'esp32-c6' {
+export function toQemuBoardType(
+  kind: BoardKind,
+): 'esp32' | 'esp32-s3' | 'esp32-c3' | 'esp32-c6' | 'esp32-4848s040' {
   // Overlay-registered boards carry their base chip in the registry.
   const proFam = getProBoard(kind)?.esp32Family;
   // Chips with NO QEMU machine anywhere (backend esp_qemu_manager knows
@@ -68,6 +70,9 @@ export function toQemuBoardType(kind: BoardKind): 'esp32' | 'esp32-s3' | 'esp32-
     );
   }
   if (proFam) return proFam;
+  // Its own entry in the backend (esp32_lib_manager): esp32s3-picsimlab with the
+  // board's PSRAM, flash size and GT911.
+  if (kind === 'esp32-4848s040') return 'esp32-4848s040';
   if (kind === 'esp32-s3' || kind === 'xiao-esp32-s3' || kind === 'arduino-nano-esp32')
     return 'esp32-s3';
   if (kind === 'esp32-c3' || kind === 'xiao-esp32-c3' || kind === 'aitewinrobot-esp32c3-supermini')
@@ -296,6 +301,11 @@ export class Esp32Bridge {
    * componentId to the chip's element.
    */
   onChipFramebuffer: ((componentId: string, frame: ChipFramebufferFrame) => void) | null = null;
+  /** The board's own panel (an ESP32-S3 panel board on our esp32s3-picsimlab
+   *  machine): a whole picture, rows of `pitch` bytes in `format`. */
+  onPanelFramebuffer:
+    | ((frame: { width: number; height: number; pitch: number; format: string; bytes: Uint8Array }) => void)
+    | null = null;
   onI2cEvent: ((addr: number, data: number) => void) | null = null;
   /** A write phase a write sink echoed, with the component id of the part
    *  whose record answered it (absent from a worker that does not say). */
@@ -372,6 +382,7 @@ export class Esp32Bridge {
       case 'esp32-s3':
       case 'xiao-esp32-s3':
       case 'arduino-nano-esp32':
+      case 'esp32-4848s040':
         return 43;
       case 'esp32-c6':
         return 16; // U0TXD default on the C6 (silkscreen TX on the DevKitC-1)
@@ -612,6 +623,21 @@ export class Esp32Bridge {
           );
           const pin = msg.data.pin as number | undefined;
           this.onWs2812Update?.(channel, pixels, pin ?? null);
+          break;
+        }
+        case 'framebuffer': {
+          const b64 = (msg.data.bytes_b64 as string) ?? '';
+          if (!b64 || !this.onPanelFramebuffer) break;
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          this.onPanelFramebuffer({
+            width: Number(msg.data.width) | 0,
+            height: Number(msg.data.height) | 0,
+            pitch: Number(msg.data.pitch) | 0,
+            format: String(msg.data.format ?? 'rgb565'),
+            bytes,
+          });
           break;
         }
         case 'chip_framebuffer': {

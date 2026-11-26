@@ -20,6 +20,7 @@ import { Esp32 } from '../velxio-components/Esp32';
 import { Attiny85 } from '../velxio-components/Attiny85';
 import { PiPicoW } from '../velxio-components/PiPicoW';
 import { Stm32H7Display } from './Stm32H7Display';
+import { Esp32PanelBoard } from './Esp32PanelBoard';
 import {
   Stm32BluePill,
   Stm32BlackPill,
@@ -206,6 +207,8 @@ export const BoardOnCanvas = ({
         return <Stm32Netduino2 id={id} x={x} y={y} />;
       case 'stm32h7-core-v13':
         return <Stm32H7Display id={id} x={x} y={y} />;
+      case 'esp32-4848s040':
+        return <Esp32PanelBoard id={id} x={x} y={y} />;
       case 'attiny85':
         return <Attiny85 id={id} x={x} y={y} led1={led13} />;
     }

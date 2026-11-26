@@ -27,6 +27,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'stm32-bluepill': 'STM32F103C8 Cortex-M3, 64KB flash, 37 GPIO (QEMU)',
   'stm32-blackpill': 'STM32F411CE Cortex-M4, 512KB flash, 50 GPIO (QEMU)',
   'stm32h7-core-v13': 'STM32H743 Cortex-M7, 32MB SDRAM, 1024×600 LTDC, MicroPython + LVGL (Renode)',
+  'esp32-4848s040': 'ESP32-S3, 8MB PSRAM, 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
 };
 
 const BOARD_ICON: Record<BoardKind, string> = {
@@ -43,6 +44,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
   'stm32-bluepill': '◈',
   'stm32-blackpill': '◈',
   'stm32h7-core-v13': '▣',
+  'esp32-4848s040': '▣',
 };
 
 interface BoardPickerModalProps {
@@ -65,6 +67,7 @@ const BOARDS: BoardKind[] = [
   'stm32-bluepill',
   'stm32-blackpill',
   'stm32h7-core-v13',
+  'esp32-4848s040',
 ];
 
 export const BoardPickerModal = ({ isOpen, onClose, onSelectBoard }: BoardPickerModalProps) => {

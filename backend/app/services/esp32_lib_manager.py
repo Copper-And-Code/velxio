@@ -138,6 +138,29 @@ _MACHINE: dict[str, str] = {
     'esp32-c3':                       'esp32c3-picsimlab',
     'xiao-esp32-c3':                  'esp32c3-picsimlab',
     'aitewinrobot-esp32c3-supermini': 'esp32c3-picsimlab',
+    # ESP32-S3 with a 480x480 RGB panel and a GT911, running its VELXIO
+    # firmware (copper-and-code-mcu-boards), on our QEMU's esp32s3-picsimlab.
+    'esp32-4848s040':                 'esp32s3-picsimlab',
+}
+
+# QEMU options a board needs that its machine cannot guess.
+_EXTRA_ARGS: dict[str, list[str]] = {
+    # 8 MB octal PSRAM: the framebuffers and the MicroPython heap.
+    'esp32-4848s040': ['-m', '8M', '-global', 'ssi_psram.is_octal=true'],
+}
+
+# Flash a board's partition table spans, when more than the 4 MB the image is
+# padded to by default: the worker grows the compact image the browser sends.
+_FLASH_BYTES: dict[str, int] = {
+    'esp32-4848s040': 16 * 1024 * 1024,
+}
+
+# Parts soldered on a board, attached at every start (the canvas updates them
+# by pin like any sensor).
+_BUILTIN_SENSORS: dict[str, list[dict]] = {
+    # The panel's GT911 touch controller, on I2C0 (SDA GPIO19, SCL GPIO45).
+    'esp32-4848s040': [{'sensor_type': 'gt911', 'pin': 19, 'addr': 0x5D,
+                        'width': 480, 'height': 480}],
 }
 
 # Board types that require the RISC-V library instead of the Xtensa one
@@ -349,7 +372,9 @@ class EspLibManager:
             'lib_path':          lib_path,
             'firmware_b64':      firmware_b64,
             'machine':           machine,
-            'sensors':           sensors or [],
+            'sensors':           [*_BUILTIN_SENSORS.get(board_type, []), *(sensors or [])],
+            'extra_args':        _EXTRA_ARGS.get(board_type, []),
+            'flash_size':        _FLASH_BYTES.get(board_type, 0),
             'wifi_enabled':      wifi_enabled,
             'wifi_hostfwd_port': wifi_hostfwd_port,
             # The board's SPI bus as the tab sees it, in the config rather than

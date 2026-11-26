@@ -26,6 +26,14 @@ const FIRMWARE_MAP: Record<string, FirmwareConfig> = {
     cacheKey: 'micropython-esp32s3-v1.28.0',
     fallback: '/firmware/micropython-esp32s3.bin',
   },
+  // ESP32-4848S040: the VELXIO variant of copper-and-code-mcu-boards (MicroPython 1.29 +
+  // LVGL, the panel on the emulator's RGB display), a whole 16 MB image at offset 0.
+  // Not in git (.gitignore): scripts/build_esp32.sh ESP32_4848S040 VELXIO, copied here.
+  'esp32-4848s040': {
+    remote: '/firmware/micropython-esp32-4848s040-velxio.bin',
+    cacheKey: 'micropython-esp32-4848s040-velxio-v0.1.8-19',
+    fallback: '/firmware/micropython-esp32-4848s040-velxio.bin',
+  },
   'esp32-c3': {
     remote: 'https://micropython.org/resources/firmware/ESP32_GENERIC_C3-20260406-v1.28.0.bin',
     cacheKey: 'micropython-esp32c3-v1.28.0',
@@ -65,7 +73,10 @@ function overlayFlashOffset(boardKind: BoardKind | undefined): number | null {
 }
 
 /** Map any ESP32-family board kind to firmware variant key */
-export function toFirmwareVariant(boardKind: BoardKind): 'esp32' | 'esp32-s3' | 'esp32-c3' {
+export function toFirmwareVariant(
+  boardKind: BoardKind,
+): 'esp32' | 'esp32-s3' | 'esp32-c3' | 'esp32-4848s040' {
+  if (boardKind === 'esp32-4848s040') return 'esp32-4848s040';
   if (
     boardKind === 'esp32-s3' ||
     boardKind === 'xiao-esp32-s3' ||
@@ -196,6 +207,9 @@ export function padToFlashSize(firmware: Uint8Array, boardKind?: BoardKind): Uin
   //   E (141) spi_flash: Detected size(2048k) smaller than the size in the
   //                      binary image header(4096k). Probe failed.
   // (See https://github.com/davidmonterocrespo24/velxio/issues/122)
+  // A board whose partition table spans more (the ESP32-4848S040's 16 MB) is grown
+  // by the backend (esp32_lib_manager _FLASH_BYTES): 16 MB here would not fit one
+  // WebSocket message.
   const MIN_BYTES = 4 * 1024 * 1024;
   const VALID_BYTES = [2, 4, 8, 16].map((mb) => mb * 1024 * 1024);
   const target = VALID_BYTES.find(

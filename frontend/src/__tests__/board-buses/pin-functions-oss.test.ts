@@ -34,6 +34,7 @@ import {
 } from '../../simulation/buses/pinFunctions';
 import { stm32PinNumber } from '../../simulation/buses/boardPinTables/stm32';
 import { STM32H7_PINS } from '../../simulation/stm32h7Pins';
+import { ESP32_PANEL_PINS } from '../../components/simulator/Esp32PanelBoard';
 
 const OSS_KINDS = Object.keys(BOARD_KIND_LABELS) as BoardKind[];
 
@@ -50,6 +51,7 @@ function padNames(kind: BoardKind): string[] {
   }
   // Drawn by a React component, not a custom element: its pad table.
   if (kind === 'stm32h7-core-v13') return STM32H7_PINS.map((p) => p.name);
+  if (kind === 'esp32-4848s040') return ESP32_PANEL_PINS.map((p) => p.name);
   let tag: string;
   if (kind === 'arduino-uno' || kind === 'arduino-nano' || kind === 'arduino-mega')
     tag = `wokwi-${kind}`;

@@ -25,6 +25,7 @@ import { esp32s3TftExamples } from './examples-esp32s3-tft';
 import { jsemuChipExamples } from './examples-jsemu-chips';
 import { stm32h7Examples } from './examples-stm32h7';
 import { studioStm32h7Examples } from './examples-studio-stm32h7';
+import { esp32_4848s040Examples } from './examples-esp32-4848s040';
 import eeprom24c01C from '../components/customChips/examples/eeprom-24c01.c?raw';
 import eeprom24c01J from '../components/customChips/examples/eeprom-24c01.chip.json?raw';
 
@@ -12957,6 +12958,7 @@ export const exampleProjects: ExampleProject[] = [
   ...jsemuChipExamples,
   ...stm32h7Examples,
   ...studioStm32h7Examples,
+  ...esp32_4848s040Examples,
 ];
 
 // Get examples by category

@@ -888,7 +888,8 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
             _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
             pad_to_flash_size = _mod.pad_to_flash_size
             firmware_is_micropython = _mod.firmware_is_micropython
-        fw_bytes = pad_to_flash_size(base64.b64decode(firmware_b64))
+        fw_bytes = pad_to_flash_size(base64.b64decode(firmware_b64),
+                                     int(cfg.get('flash_size', 0)))
         firmware_is_upy = firmware_is_micropython(fw_bytes)
         tmp = tempfile.NamedTemporaryFile(suffix='.bin', delete=False)
         tmp.write(fw_bytes)

@@ -118,6 +118,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'stm32-netduino-plus2': 'Netduino Plus 2, STM32F405 Cortex-M4 (QEMU)',
   'stm32-netduino2': 'Netduino 2, STM32F205 Cortex-M3 (QEMU, serial)',
   'stm32h7-core-v13': 'STM32H743 Cortex-M7, 32MB SDRAM, 1024×600 LTDC, MicroPython + LVGL (Renode)',
+  'esp32-4848s040': 'ESP32-S3, 8MB PSRAM, 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
   attiny85: '8-bit AVR, 8KB flash, 6 GPIO (browser)',
 };
 
@@ -254,6 +255,7 @@ const ALL_BOARDS: BoardKind[] = [
   'stm32-netduino-plus2',
   'stm32-netduino2',
   'stm32h7-core-v13',
+  'esp32-4848s040',
   'attiny85',
 ];
 

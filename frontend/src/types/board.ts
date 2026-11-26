@@ -34,6 +34,9 @@ export type BoardKind =
   // VELXIO variant) in Renode. Deliberately not `stm32-…`: isStm32BoardKind() is the
   // QEMU STM32 lane, which this board is not part of.
   | 'stm32h7-core-v13'
+  // ESP32-4848S040 (ESP32-S3, 4" 480x480 RGB panel, GT911), MicroPython + LVGL (its
+  // VELXIO firmware, copper-and-code-mcu-boards) on our QEMU's esp32s3-picsimlab.
+  | 'esp32-4848s040'
   | 'attiny85'; // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython' | 'espidf';
@@ -90,6 +93,8 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'aitewinrobot-esp32c3-supermini',
   // STM32H743 Core (Renode bridge): the firmware is MicroPython, there is no Arduino toolchain
   'stm32h7-core-v13',
+  // ESP32-4848S040: its prebuilt MicroPython + LVGL firmware, no Arduino build
+  'esp32-4848s040',
 ]);
 
 /** Boards that can run pure ESP-IDF projects (app_main entry point, IDF
@@ -299,6 +304,7 @@ export const BOARD_KIND_LABELS: Record<BoardKind, string> = {
   'stm32-netduino-plus2': 'Netduino Plus 2',
   'stm32-netduino2': 'Netduino 2',
   'stm32h7-core-v13': 'STM32H743 Core V1.3 (1024×600 LTDC)',
+  'esp32-4848s040': 'ESP32-4848S040 (480×480 panel)',
   attiny85: 'ATtiny85',
 };
 
@@ -341,6 +347,7 @@ export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
   'stm32-netduino2': 'STMicroelectronics:stm32:GenF2:pnum=GENERIC_F205RGTX',
   // MicroPython only: the firmware is prebuilt, nothing is compiled.
   'stm32h7-core-v13': null,
+  'esp32-4848s040': null,
   attiny85: 'ATTinyCore:avr:attinyx5:chip=85,clock=16pll',
 };
 
@@ -488,6 +495,7 @@ export const BOARD_ONBOARD_LEDS: Record<BoardKind, readonly OnboardLed[]> = {
   'stm32-netduino2': NO_ONBOARD_LED,
   // Its LEDs (PB0 red, PB1 green) are GPIO events of the Renode bridge.
   'stm32h7-core-v13': NO_ONBOARD_LED,
+  'esp32-4848s040': NO_ONBOARD_LED,
   // PB1, the Digispark convention; the bare DIP-8 element draws no LED and
   // examples wire a real one to PB1.
   attiny85: [{ id: 'led', kind: 'gpio', pin: 1, activeLow: false }],

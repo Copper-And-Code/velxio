@@ -307,6 +307,7 @@ export const BOARD_COMPONENT_IDS = [
   'stm32-netduino-plus2',
   'stm32-netduino2',
   'stm32h7-core-v13',
+  'esp32-4848s040',
   'attiny85',
 ];
 
@@ -475,7 +476,7 @@ export function boardPinToNumber(boardId: string, pinName: string): number | nul
     // classic ESP32 tops out at GPIO39, the S3 at GPIO48. A shared 39
     // rejected the S3 DevKitC's 40/41/42/45/46/47/48 pads, so seven pads
     // on that board resolved to null and a wire to them did nothing.
-    const maxGpio = boardId.startsWith('esp32-s3') ? 48 : 39;
+    const maxGpio = boardId.startsWith('esp32-s3') || boardId.startsWith('esp32-4848s040') ? 48 : 39;
     const num = parseInt(pinName, 10);
     if (!isNaN(num) && num >= 0 && num <= maxGpio) return num;
     if (pinName === 'TX' || pinName === 'RX') return esp32Uart0Pad(boardId, pinName);

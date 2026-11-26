@@ -61,6 +61,17 @@ export const OSS_BOARD_PIN_TABLES: Record<BoardKind, BoardPinFunctions> = {
   // STM32H743 Core in Renode: only USART1 on PA9/PA10 (AF7), the MicroPython
   // REPL, is bridged (with GPIO and the LTDC panel). Its other I2C/SPI/UART
   // controllers have no canvas part behind them, so they are not listed.
+  // ESP32-4848S040: its UART0 header (the REPL) is the bus the canvas reaches; the
+  // touch is on I2C0 inside the board (GPIO19/45, no pads).
+  'esp32-4848s040': {
+    routing: 'matrix',
+    controllers: [{ bus: 'uart', unit: 0, name: 'UART0', defaultPins: { tx: 43, rx: 44 } }],
+    pins: {
+      43: [{ bus: 'uart', unit: 0, signal: 'tx' }],
+      44: [{ bus: 'uart', unit: 0, signal: 'rx' }],
+    },
+    source: 'ESP32-S3 datasheet: UART0 on GPIO43/44 (IO_MUX), the console of the ESP32-4848S040',
+  },
   'stm32h7-core-v13': {
     routing: 'mux',
     controllers: [{ bus: 'uart', unit: 0, name: 'USART1', defaultPins: { tx: 9, rx: 10 } }],

@@ -204,3 +204,5 @@ backend/.venv/*
 # never land in the OSS repo. (micropython-*.bin are the legitimate OSS firmwares.)
 frontend/public/firmware/esp32*-rom.bin
 frontend/public/firmware/esp32*-drom.bin
+# ESP32-4848S040 VELXIO firmware (copper-and-code-mcu-boards), built locally, never committed.
+frontend/public/firmware/micropython-esp32-4848s040-velxio.bin
