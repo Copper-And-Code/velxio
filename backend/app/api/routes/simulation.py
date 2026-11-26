@@ -164,7 +164,9 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
             # ── STM32H7_CORE in Renode (app/services/stm32h7_renode.py) ──
             # Not the QEMU STM32 lane above: its own `stm32h7_` messages,
             # handled through the same extension hook.
-            elif msg_type.startswith('stm32h7_'):
+            # ── and the Waveshare RP2350-Touch-LCD-4 on our QEMU's raspi-pico2
+            # (app/services/rp2350_qemu.py): its `rp2350_` messages, same route.
+            elif msg_type.startswith('stm32h7_') or msg_type.startswith('rp2350_'):
                 await dispatch_ws_sim_message(
                     websocket, client_id, msg_type, msg_data, qemu_callback,
                 )

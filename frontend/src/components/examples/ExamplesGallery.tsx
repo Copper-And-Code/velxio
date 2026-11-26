@@ -56,6 +56,7 @@ const BOARD_TABS: BoardTab[] = [
   { id: 'stm32-blackpill', label: 'STM32 Black Pill', color: '#ffffff', bg: '#2d3436' },
   { id: 'stm32h7-core-v13', label: 'STM32H743 Core', color: '#ffffff', bg: '#0d3a24' },
   { id: 'esp32-4848s040', label: 'ESP32-4848S040', color: '#ffffff', bg: '#1b1d21' },
+  { id: 'waveshare-rp2350-lcd4', label: 'RP2350-Touch-LCD-4', color: '#ffffff', bg: '#14261c' },
   { id: 'attiny85', label: 'ATtiny85', color: '#ffffff', bg: '#5d4037' },
   { id: 'multi', label: 'Multi-Board', color: '#ffffff', bg: '#7b2d8b' },
   { id: 'analog', label: 'Analog', color: '#ffffff', bg: '#0ea5a5' },

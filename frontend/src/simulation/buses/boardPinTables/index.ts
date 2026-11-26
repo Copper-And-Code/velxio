@@ -72,6 +72,16 @@ export const OSS_BOARD_PIN_TABLES: Record<BoardKind, BoardPinFunctions> = {
     },
     source: 'ESP32-S3 datasheet: UART0 on GPIO43/44 (IO_MUX), the console of the ESP32-4848S040',
   },
+  // Waveshare RP2350-Touch-LCD-4: its UART0 header (the REPL of the VELXIO firmware).
+  'waveshare-rp2350-lcd4': {
+    routing: 'matrix',
+    controllers: [{ bus: 'uart', unit: 0, name: 'UART0', defaultPins: { tx: 46, rx: 45 } }],
+    pins: {
+      46: [{ bus: 'uart', unit: 0, signal: 'tx' }],
+      45: [{ bus: 'uart', unit: 0, signal: 'rx' }],
+    },
+    source: 'RP2350 datasheet GPIO function table: UART0 TX on GP46, RX on GP45 (RP2350B)',
+  },
   'stm32h7-core-v13': {
     routing: 'mux',
     controllers: [{ bus: 'uart', unit: 0, name: 'USART1', defaultPins: { tx: 9, rx: 10 } }],

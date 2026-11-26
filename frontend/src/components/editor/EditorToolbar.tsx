@@ -149,6 +149,7 @@ const BOARD_PILL_ICON: Record<BoardKind, string> = {
   'stm32-netduino2': '◈',
   'stm32h7-core-v13': '▣',
   'esp32-4848s040': '▣',
+  'waveshare-rp2350-lcd4': '▣',
 };
 
 const BOARD_PILL_COLOR: Record<BoardKind, string> = {
@@ -172,6 +173,7 @@ const BOARD_PILL_COLOR: Record<BoardKind, string> = {
   'stm32-netduino2': '#ce93d8',
   'stm32h7-core-v13': '#90caf9',
   'esp32-4848s040': 'var(--color-feedback-success)',
+  'waveshare-rp2350-lcd4': '#a5d6a7',
 };
 
 export const EditorToolbar = ({

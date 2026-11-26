@@ -30,6 +30,7 @@ import {
   isKnownBoardKind,
   isPiBoardKind,
   isStm32BoardKind,
+  usesPanelMpyBridge,
 } from '../types/board';
 import { annotateSerialChunk } from '../utils/serialDiagnostics';
 import { blockedByBoardGate, reportBoardRunRefused } from '../lib/proBoardGate';
@@ -2573,8 +2574,11 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       icReensureSerialHooks(id);
     } else if (isEsp32Kind(boardKind)) {
       wireEsp32Board(id, boardKind, pm);
-    } else if (boardKind === 'stm32h7-core-v13') {
-      const bridge = new Stm32H7Bridge(id);
+    } else if (usesPanelMpyBridge(boardKind)) {
+      const bridge =
+        boardKind === 'waveshare-rp2350-lcd4'
+          ? new Stm32H7Bridge(id, null, { prefix: 'rp2350_', board: 'waveshare-rp2350-lcd4' })
+          : new Stm32H7Bridge(id);
       bridge.onSerialData = serialCallback;
       bridge.onError = makeRunRefusedHandler(id, boardKind, serialCallback, () =>
         bridge.disconnect(),
@@ -3271,7 +3275,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
           `group-${id}`,
           // The STM32H743 Core runs MicroPython only: its main.py demo.
           getBoardSeedFiles(boardKind, seedMode) ??
-            (boardKind === 'stm32h7-core-v13' ? 'micropython' : undefined),
+            (usesPanelMpyBridge(boardKind) ? 'micropython' : undefined),
         );
       // The seed sketch includes the board's vendor library, so declare it in
       // the board's manifest (= the compile resolution scope) right away.
@@ -4732,8 +4736,8 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
           esp32Bridge.connect();
         }
-      } else if (board.boardKind === 'stm32h7-core-v13') {
-        // Renode boots the prebuilt firmware; the program queued by
+      } else if (usesPanelMpyBridge(board.boardKind)) {
+        // Renode / our QEMU boot the prebuilt firmware; the program queued by
         // loadMicroPythonProgram is pasted into the REPL once it is up.
         getStm32H7Bridge(boardId)?.connect();
       } else if (isStm32BoardKind(board.boardKind)) {
@@ -4841,7 +4845,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         getBoardSimulator(boardId)?.stop();
       } else if (isEsp32Kind(board.boardKind)) {
         getEsp32Bridge(boardId)?.disconnect();
-      } else if (board.boardKind === 'stm32h7-core-v13') {
+      } else if (usesPanelMpyBridge(board.boardKind)) {
         getStm32H7Bridge(boardId)?.disconnect();
       } else if (isStm32BoardKind(board.boardKind)) {
         getStm32Bridge(boardId)?.disconnect();

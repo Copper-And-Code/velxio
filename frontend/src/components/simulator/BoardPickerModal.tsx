@@ -28,6 +28,7 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'stm32-blackpill': 'STM32F411CE Cortex-M4, 512KB flash, 50 GPIO (QEMU)',
   'stm32h7-core-v13': 'STM32H743 Cortex-M7, 32MB SDRAM, 1024×600 LTDC, MicroPython + LVGL (Renode)',
   'esp32-4848s040': 'ESP32-S3, 8MB PSRAM, 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
+  'waveshare-rp2350-lcd4': 'RP2350B, 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
 };
 
 const BOARD_ICON: Record<BoardKind, string> = {
@@ -45,6 +46,7 @@ const BOARD_ICON: Record<BoardKind, string> = {
   'stm32-blackpill': '◈',
   'stm32h7-core-v13': '▣',
   'esp32-4848s040': '▣',
+  'waveshare-rp2350-lcd4': '▣',
 };
 
 interface BoardPickerModalProps {
@@ -68,6 +70,7 @@ const BOARDS: BoardKind[] = [
   'stm32-blackpill',
   'stm32h7-core-v13',
   'esp32-4848s040',
+  'waveshare-rp2350-lcd4',
 ];
 
 export const BoardPickerModal = ({ isOpen, onClose, onSelectBoard }: BoardPickerModalProps) => {

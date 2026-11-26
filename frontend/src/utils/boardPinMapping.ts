@@ -308,6 +308,7 @@ export const BOARD_COMPONENT_IDS = [
   'stm32-netduino2',
   'stm32h7-core-v13',
   'esp32-4848s040',
+  'waveshare-rp2350-lcd4',
   'attiny85',
 ];
 
@@ -375,6 +376,13 @@ export function boardPinToNumber(boardId: string, pinName: string): number | nul
       if (!isNaN(d) && d <= 53) return d;
     }
     return ARDUINO_MEGA_ANALOG_MAP[pinName] ?? null;
+  }
+
+  // Waveshare RP2350-Touch-LCD-4: an RP2350B, GP0-GP47 (its pads: the UART0 header).
+  if (boardId === 'waveshare-rp2350-lcd4') {
+    if (POWER_PAD_RE.test(pinName)) return -1;
+    const n = parseInt(pinName.startsWith('GP') ? pinName.substring(2) : pinName, 10);
+    return !isNaN(n) && n >= 0 && n <= 47 ? n : null;
   }
 
   if (boardId === 'nano-rp2040' || boardId === 'raspberry-pi-pico') {

@@ -24,6 +24,7 @@ import { epaperExamples } from '../data/examples-displays-epaper';
 import { circuitExamples } from '../data/examples-circuits';
 import { stm32h7Examples } from '../data/examples-stm32h7';
 import { esp32_4848s040Examples } from '../data/examples-esp32-4848s040';
+import { waveshareRp2350Lcd4Examples } from '../data/examples-waveshare-rp2350-lcd4';
 import type { ExampleProject } from '../data/examples';
 
 const ALL_EXAMPLES: ExampleProject[] = [
@@ -34,6 +35,7 @@ const ALL_EXAMPLES: ExampleProject[] = [
   ...circuitExamples,
   ...stm32h7Examples,
   ...esp32_4848s040Examples,
+  ...waveshareRp2350Lcd4Examples,
 ];
 
 /**

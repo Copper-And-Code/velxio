@@ -134,9 +134,25 @@ export class Stm32H7Bridge {
   private _pendingProgram: MpyProgram | null = null;
   private _mpySession: MicroPythonSession | null = null;
 
-  constructor(boardId: string, firmwarePath: string | null = null) {
+  /**
+   * The lane this bridge talks to. The STM32H743 Core in Renode by default;
+   * the Waveshare RP2350-Touch-LCD-4 on our QEMU (backend rp2350_qemu.py)
+   * speaks the same events with the `rp2350_` prefix.
+   */
+  private readonly prefix: string;
+  private readonly boardKind: string;
+  private readonly startExtras: Record<string, unknown>;
+
+  constructor(
+    boardId: string,
+    firmwarePath: string | null = null,
+    lane: { prefix?: string; board?: string; startData?: Record<string, unknown> } = {},
+  ) {
     this.boardId = boardId;
     this.firmwarePath = firmwarePath;
+    this.prefix = lane.prefix ?? 'stm32h7_';
+    this.boardKind = lane.board ?? 'stm32h7-core-v13';
+    this.startExtras = lane.startData ?? {};
   }
 
   get connected(): boolean {
@@ -200,9 +216,9 @@ export class Stm32H7Bridge {
     socket.onopen = () => {
       this._connected = true;
       this.onConnected?.();
-      const startData: Record<string, unknown> = { board: 'stm32h7-core-v13' };
+      const startData: Record<string, unknown> = { board: this.boardKind, ...this.startExtras };
       if (this.firmwarePath) startData.firmware_path = this.firmwarePath;
-      this._send({ type: 'stm32h7_start', data: startData });
+      this._send({ type: `${this.prefix}start`, data: startData });
     };
 
     socket.onmessage = (event: MessageEvent) => {
@@ -230,7 +246,7 @@ export class Stm32H7Bridge {
         case 'error':
           this.onError?.(msg.data.message as string);
           break;
-        case 'stm32h7_gpio_change': {
+        case `${this.prefix}gpio_change`: {
           const port = String(msg.data.port ?? '');
           const pin  = Number(msg.data.pin) | 0;
           const val  = Boolean(msg.data.value);
@@ -279,7 +295,7 @@ export class Stm32H7Bridge {
 
   disconnect(): void {
     if (this.socket) {
-      this._send({ type: 'stm32h7_stop' });
+      this._send({ type: `${this.prefix}stop` });
       this.socket.close();
       this.socket = null;
     }
@@ -288,12 +304,12 @@ export class Stm32H7Bridge {
   }
 
   sendSerialByte(byte: number): void {
-    this._send({ type: 'stm32h7_serial_input', data: { bytes: [byte] } });
+    this._send({ type: `${this.prefix}serial_input`, data: { bytes: [byte] } });
   }
 
   sendSerialBytes(bytes: number[]): void {
     if (bytes.length === 0) return;
-    this._send({ type: 'stm32h7_serial_input', data: { bytes } });
+    this._send({ type: `${this.prefix}serial_input`, data: { bytes } });
   }
 
   /**
@@ -312,7 +328,7 @@ export class Stm32H7Bridge {
    */
   sendTouch(x: number, y: number, pressed: boolean): void {
     this._send({
-      type: 'stm32h7_touch_input',
+      type: `${this.prefix}touch_input`,
       data: { x: Math.round(x), y: Math.round(y), pressed },
     });
   }
@@ -327,7 +343,7 @@ export class Stm32H7Bridge {
     if (p.length !== 1 || p < 'A' || p > 'H') return;
     if (!Number.isInteger(pin) || pin < 0 || pin > 15) return;
     this._send({
-      type: 'stm32h7_gpio_input',
+      type: `${this.prefix}gpio_input`,
       data: { port: p, pin, value },
     });
   }

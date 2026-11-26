@@ -145,6 +145,9 @@ except ImportError:
 # simulation-WS messages and teardown, through the same hooks.
 from app.services import stm32h7_renode
 stm32h7_renode.register()
+# Waveshare RP2350-Touch-LCD-4 on our QEMU's raspi-pico2 (rp2350_* messages)
+from app.services import rp2350_qemu
+rp2350_qemu.register()
 
 # Optional QEMU board lane. Same extension pattern as `app.pro` above, but a
 # separate package on purpose: the emulators for the paid board families

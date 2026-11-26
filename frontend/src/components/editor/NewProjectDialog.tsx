@@ -55,6 +55,7 @@ const BOARD_BLURBS: Record<string, string> = {
   'xiao-esp32-s3': 'Seeed XIAO tiny form, 8MB flash+PSRAM (QEMU)',
   'xiao-esp32-c3': 'Seeed XIAO ESP32-C3 mini board (QEMU)',
   'esp32-4848s040': 'ESP32-S3 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
+  'waveshare-rp2350-lcd4': 'Waveshare RP2350 4" 480×480 touch panel, MicroPython + LVGL (QEMU)',
   'stm32-bluepill': 'STM32F103C8 Cortex-M3, 64KB flash, 37 GPIO (QEMU)',
   'stm32-blackpill': 'STM32F411CE Cortex-M4, 512KB flash, 50 GPIO (QEMU)',
   'stm32-bluepill-f103cb': 'STM32F103CB Cortex-M3, 128KB flash, 37 GPIO (QEMU)',
@@ -158,6 +159,7 @@ const PREFERRED_BLINK_EXAMPLE: Record<string, string> = {
   // No LED blink: the LVGL touch demo on its panel is the first run.
   'stm32h7-core-v13': 'stm32h7-lvgl-touch',
   'esp32-4848s040': 'esp32-4848s040-lvgl-touch',
+  'waveshare-rp2350-lcd4': 'waveshare-rp2350-lcd4-lvgl-touch',
   // M5Stack all-in-ones (overlay kinds): no LED to blink — the on-LCD hello
   // is the first run. Both ids carry a captured gallery thumb.
   'cardputer-adv': 'cardputer-adv-hello',

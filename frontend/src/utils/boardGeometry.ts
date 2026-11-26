@@ -67,6 +67,7 @@ export const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'stm32h7-core-v13': { w: 470, h: 348 },
   // 480x480 panel at 0.6 scale in an 18 px bezel, plus the title strip (Esp32PanelBoard).
   'esp32-4848s040': { w: 324, h: 346 },
+  'waveshare-rp2350-lcd4': { w: 324, h: 346 },
   attiny85: { w: 160, h: 132 },
 };
 

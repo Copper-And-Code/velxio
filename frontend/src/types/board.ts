@@ -37,6 +37,9 @@ export type BoardKind =
   // ESP32-4848S040 (ESP32-S3, 4" 480x480 RGB panel, GT911), MicroPython + LVGL (its
   // VELXIO firmware, copper-and-code-mcu-boards) on our QEMU's esp32s3-picsimlab.
   | 'esp32-4848s040'
+  // Waveshare RP2350-Touch-LCD-4 (RP2350B, 4" 480x480 RGB panel, GT911), MicroPython +
+  // LVGL (its VELXIO firmware) on our QEMU's raspi-pico2 machine (backend rp2350_qemu.py).
+  | 'waveshare-rp2350-lcd4'
   | 'attiny85'; // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython' | 'espidf';
@@ -95,6 +98,8 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'stm32h7-core-v13',
   // ESP32-4848S040: its prebuilt MicroPython + LVGL firmware, no Arduino build
   'esp32-4848s040',
+  // Waveshare RP2350-Touch-LCD-4: its prebuilt MicroPython + LVGL firmware
+  'waveshare-rp2350-lcd4',
 ]);
 
 /** Boards that can run pure ESP-IDF projects (app_main entry point, IDF
@@ -305,6 +310,7 @@ export const BOARD_KIND_LABELS: Record<BoardKind, string> = {
   'stm32-netduino2': 'Netduino 2',
   'stm32h7-core-v13': 'STM32H743 Core V1.3 (1024×600 LTDC)',
   'esp32-4848s040': 'ESP32-4848S040 (480×480 panel)',
+  'waveshare-rp2350-lcd4': 'Waveshare RP2350-Touch-LCD-4 (480×480 panel)',
   attiny85: 'ATtiny85',
 };
 
@@ -348,6 +354,7 @@ export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
   // MicroPython only: the firmware is prebuilt, nothing is compiled.
   'stm32h7-core-v13': null,
   'esp32-4848s040': null,
+  'waveshare-rp2350-lcd4': null,
   attiny85: 'ATTinyCore:avr:attinyx5:chip=85,clock=16pll',
 };
 
@@ -496,6 +503,7 @@ export const BOARD_ONBOARD_LEDS: Record<BoardKind, readonly OnboardLed[]> = {
   // Its LEDs (PB0 red, PB1 green) are GPIO events of the Renode bridge.
   'stm32h7-core-v13': NO_ONBOARD_LED,
   'esp32-4848s040': NO_ONBOARD_LED,
+  'waveshare-rp2350-lcd4': NO_ONBOARD_LED,
   // PB1, the Digispark convention; the bare DIP-8 element draws no LED and
   // examples wire a real one to PB1.
   attiny85: [{ id: 'led', kind: 'gpio', pin: 1, activeLow: false }],
@@ -511,4 +519,13 @@ export function onboardLedsFor(kind: string): readonly OnboardLed[] {
   return Object.prototype.hasOwnProperty.call(BOARD_ONBOARD_LEDS, kind)
     ? BOARD_ONBOARD_LEDS[kind as BoardKind]
     : NO_ONBOARD_LED;
+}
+
+/**
+ * Panel boards that run their MicroPython + LVGL firmware on a backend emulator
+ * behind Stm32H7Bridge: the STM32H743 Core (Renode, `stm32h7_` lane) and the
+ * Waveshare RP2350-Touch-LCD-4 (our QEMU, `rp2350_` lane).
+ */
+export function usesPanelMpyBridge(kind: BoardKind | string): boolean {
+  return kind === 'stm32h7-core-v13' || kind === 'waveshare-rp2350-lcd4';
 }
