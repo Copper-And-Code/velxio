@@ -532,6 +532,12 @@
       "logTitle": "console.* ed errori della pagina World",
       "emptyLog": "Ancora nessun messaggio.",
       "close": "Chiudi il World"
+    },
+    "record": {
+      "label": "REC",
+      "startTitle": "Registra la simulazione in un video (nella finestra del browser scegli questa scheda)",
+      "stopTitle": "Ferma e scarica il video",
+      "unsupported": "Questo browser non può registrare lo schermo."
     }
   },
   "about": {

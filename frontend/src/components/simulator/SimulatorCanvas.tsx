@@ -22,6 +22,7 @@ import React, { useEffect, useState, useRef, useCallback, useSyncExternalStore }
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useWorldStore } from '../../world/useWorldStore';
+import { RecordButton } from './RecordButton';
 import { ComponentPickerModal } from '../ComponentPickerModal';
 import { PartInspectorDialog, type InspectorAction } from './PartInspectorDialog';
 import { CustomChipDialog } from '../customChips/CustomChipDialog';
@@ -3240,6 +3241,9 @@ export const SimulatorCanvas = ({ headerSlot }: SimulatorCanvasProps = {}) => {
                   </svg>
                   3D
                 </button>
+
+                {/* Record the simulator panel (canvas or World) to a video */}
+                <RecordButton />
 
                 {/* Header toggles for COMPONENT-owned webcams (vision sensors
                     that capture the webcam themselves — see

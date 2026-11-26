@@ -569,6 +569,12 @@
       "logTitle": "console.* and errors of the World page",
       "emptyLog": "Nothing logged yet.",
       "close": "Close the World"
+    },
+    "record": {
+      "label": "REC",
+      "startTitle": "Record the simulation to a video (pick this tab in the browser dialog)",
+      "stopTitle": "Stop and download the video",
+      "unsupported": "This browser cannot record the screen."
     }
   },
   "about": {
