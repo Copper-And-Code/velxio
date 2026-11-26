@@ -55,6 +55,15 @@ class TestWifiNicArg(unittest.TestCase):
         self.assertIsNone(wifi_nic_arg('esp32s3-picsimlab', wifi_enabled=True))
         self.assertIsNone(wifi_nic_arg('esp32s3-picsimlab', wifi_enabled=False))
 
+    def test_s3_gets_its_radio_from_a_library_that_has_one(self):
+        """A library exporting qemu_picsimlab_esp32s3_wifi (Copper-And-Code
+        qemu) has the S3 MAC: the radio is attached always, as on the ESP32."""
+        for enabled in (True, False):
+            arg = wifi_nic_arg('esp32s3-picsimlab', wifi_enabled=enabled, s3_radio=True)
+            self.assertIsNotNone(arg)
+            self.assertIn('model=esp32s3_wifi', arg)
+            self.assertIn('net=192.168.4.0/24', arg)
+
     def test_hostfwd_included_when_port_set(self):
         arg = wifi_nic_arg('esp32-picsimlab', wifi_enabled=True, hostfwd_port=12345)
         self.assertIn('hostfwd=tcp:127.0.0.1:12345-192.168.4.15:80', arg)

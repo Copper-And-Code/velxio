@@ -474,7 +474,7 @@ def efuse_drive_args(machine: str, path: str) -> list[bytes]:
 
 
 def wifi_nic_arg(machine: str, wifi_enabled: bool,
-                 hostfwd_port: int = 0) -> str | None:
+                 hostfwd_port: int = 0, s3_radio: bool = False) -> str | None:
     """The `-nic` value for this machine, or None if it gets no radio.
 
     On the classic ESP32 the radio is attached whether or not the sketch
@@ -519,6 +519,12 @@ def wifi_nic_arg(machine: str, wifi_enabled: bool,
         model = 'esp32c3_wifi'
     elif machine in _WIFI_MACHINES:
         model = 'esp32_wifi'
+    elif machine == 'esp32s3-picsimlab' and s3_radio:
+        # A library whose S3 machine has the radio (Copper-And-Code qemu,
+        # hw/misc/esp32s3_wifi.c: the C3 MAC model, whose layout the S3
+        # shares) says so by exporting qemu_picsimlab_esp32s3_wifi; then it is
+        # attached always, for the reason the classic ESP32 has it above.
+        model = 'esp32s3_wifi'
     else:
         # The S3 machine models no radio (hw/xtensa/esp32s3.c never looks for
         # the NIC), so handing it one would leave an unconsumed netdev.
@@ -960,7 +966,8 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
     # ── WiFi NIC (slirp user-mode networking) ──────────────────────────────
     # Always present on the classic ESP32, on the C3 only for a sketch that
     # uses WiFi — see wifi_nic_arg().
-    nic_arg = wifi_nic_arg(machine, wifi_enabled, wifi_hostfwd_port)
+    nic_arg = wifi_nic_arg(machine, wifi_enabled, wifi_hostfwd_port,
+                           s3_radio=hasattr(lib, 'qemu_picsimlab_esp32s3_wifi'))
     if nic_arg:
         args_list.extend([b'-nic', nic_arg.encode()])
         _log(f'WiFi radio attached (sketch wants WiFi: {wifi_enabled}): -nic {nic_arg}')

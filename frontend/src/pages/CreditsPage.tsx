@@ -91,7 +91,7 @@ const SECTIONS: Section[] = [
         name: 'QEMU esp32s3-picsimlab machine',
         url: 'https://github.com/lcgamboa/qemu',
         license: 'GPL-2.0',
-        what: 'The ESP32-S3 machine the board runs on (GPIO, I2C, ADC, flash reads, RGB panel output), changes by Copper and Code to the lcgamboa fork.',
+        what: 'The ESP32-S3 machine the board runs on (GPIO, I2C, ADC, UART, flash reads, RGB panel output, WiFi through the C3 MAC model), changes by Copper and Code to the lcgamboa fork.',
       },
       {
         name: 'Copper and Code Studio examples',
