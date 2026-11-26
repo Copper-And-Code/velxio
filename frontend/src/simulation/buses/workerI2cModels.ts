@@ -24,6 +24,8 @@ export const WORKER_I2C_MODELS: ReadonlySet<string> = new Set([
   'ds3231',
   'ssd1306',
   'pcf8574',
+  // The touch controller of the panel boards (esp32-4848s040).
+  'gt911',
   'i2c-write-sink',
   'custom-chip',
 ]);
