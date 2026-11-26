@@ -29,7 +29,8 @@ import { useOscilloscopeStore } from '../store/useOscilloscopeStore';
 import { useProjectStore } from '../store/useProjectStore';
 import {
   NewProjectDialog,
-  clearWorkspaceForStarter,
+  applyStarter,
+  DEFAULT_STARTER_KIND,
 } from '../components/editor/NewProjectDialog';
 import { useAutoSaveProject } from '../hooks/useAutoSaveProject';
 import { registerEditorCommand } from '../lib/editorCommands';
@@ -156,7 +157,10 @@ export const EditorPage: React.FC = () => {
       sim.components.every((c) => c.id === 'led_builtin' || c.id === 'r_builtin');
     if (!pristine) return;
     starterDialogShownThisLoad = true;
-    clearWorkspaceForStarter();
+    // The default board (the STM32H743 Core) behind the dialog, not an empty canvas.
+    void applyStarter(DEFAULT_STARTER_KIND).catch((err) =>
+      console.error('[editor] default starter failed:', err),
+    );
     let cancelled = false;
     void whenNewsClear(2500).then(() => {
       if (!cancelled) setShowNewProjectDialog(true);

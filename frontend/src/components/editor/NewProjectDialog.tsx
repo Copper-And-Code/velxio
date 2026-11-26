@@ -61,6 +61,7 @@ const BOARD_BLURBS: Record<string, string> = {
   'stm32-olimex-h405': 'Olimex STM32-H405, F405RG Cortex-M4, 1MB flash (QEMU)',
   'stm32-netduino-plus2': 'Netduino Plus 2, STM32F405 Cortex-M4 (QEMU)',
   'stm32-netduino2': 'Netduino 2, STM32F205 Cortex-M3 (QEMU, serial)',
+  'stm32h7-core-v13': 'STM32H743 Cortex-M7, 1024×600 LTDC, MicroPython + LVGL (Renode)',
   'raspberry-pi-pico': 'RP2040 dual-core Cortex-M0+',
   'raspberry-pi-3': 'ARM64 Cortex-A53 quad-core, Linux/Python (QEMU)',
   'raspberry-pi-4': 'ARM64 Cortex-A72 quad-core, Linux/Python (QEMU)',
@@ -68,6 +69,7 @@ const BOARD_BLURBS: Record<string, string> = {
 };
 
 const STM32_BOARDS: BoardKind[] = [
+  'stm32h7-core-v13',
   'stm32-bluepill',
   'stm32-blackpill',
   'stm32-bluepill-f103cb',
@@ -151,6 +153,8 @@ const PREFERRED_BLINK_EXAMPLE: Record<string, string> = {
   'stm32-f4-discovery': 'stm32-f4-discovery-blink',
   'stm32-olimex-h405': 'stm32-olimex-h405-blink',
   'stm32-netduino-plus2': 'stm32-netduino-plus2-blink',
+  // No LED blink: the LVGL touch demo on its panel is the first run.
+  'stm32h7-core-v13': 'stm32h7-lvgl-touch',
   // M5Stack all-in-ones (overlay kinds): no LED to blink — the on-LCD hello
   // is the first run. Both ids carry a captured gallery thumb.
   'cardputer-adv': 'cardputer-adv-hello',
@@ -194,7 +198,14 @@ async function findBlinkExample(kind: string): Promise<ExampleProject | undefine
  * otherwise a fresh board whose default sketch already blinks the on-board
  * LED (createFileGroup picks the per-board/language blink content).
  */
-async function applyStarter(kind: string | 'blank'): Promise<void> {
+/**
+ * What a fresh editor load starts with, before the starter dialog shows: this
+ * fork's own board, the STM32H743 Core with its LVGL touch demo. Picking a card
+ * replaces it; closing the dialog keeps it. Upstream starts empty ('blank').
+ */
+export const DEFAULT_STARTER_KIND: string | 'blank' = 'stm32h7-core-v13';
+
+export async function applyStarter(kind: string | 'blank'): Promise<void> {
   clearWorkspaceForStarter();
 
   if (kind !== 'blank') {
