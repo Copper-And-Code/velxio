@@ -1,15 +1,18 @@
 :name: STM32H7_CORE VELXIO boot test headless
 :description: Headless boot test of VELXIO variant firmware (no USB no SDCARD).
+:description: Run Renode from the root of the repo: the paths are relative to it.
 
-$bin?=@/opt/github/velxio/prebuilt/stm32h7/firmware.elf
-$uartlog?=@/opt/github/velxio/renode/logs/uart_velxio.log
+$bin?=@prebuilt/stm32h7/firmware.elf
+# Renode runs from its own directory: logs go to an absolute path.
+$renodelog?="/tmp/renode_velxio_test.log"
+$uartlog?=@/tmp/uart_velxio.log
 
 using sysbus
 mach create "h743_velxio"
-machine LoadPlatformDescription @/opt/github/velxio/renode/platforms/stm32h7_core_v13.repl
+machine LoadPlatformDescription @renode/platforms/stm32h7_core_v13.repl
 
 logLevel 3
-logFile @/opt/github/velxio/renode/logs/renode_velxio.log true
+logFile $renodelog true
 logLevel -1 sysbus.usart1
 
 sysbus.usart1 CreateFileBackend $uartlog true

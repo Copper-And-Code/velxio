@@ -23,14 +23,14 @@ sudo ln -s /opt/renode_*-portable/renode /usr/local/bin/renode
 
 ### 1.2 Python deps backend
 ```bash
-cd /opt/github/velxio/backend
+cd backend
 pip install -r requirements.txt
 pip install python-jose[cryptography] passlib[bcrypt]==1.7.4 'bcrypt==4.0.1' email-validator
 ```
 
 ### 1.3 Node deps frontend
 ```bash
-cd /opt/github/velxio/frontend
+cd frontend
 npm install
 ```
 
@@ -58,7 +58,7 @@ cd backend && python test_stm32_velxio_e2e.py --png /tmp/frame.png
 Bypassa WebSocket/uvicorn e parla direttamente con `RenodeManager`.
 
 ```bash
-cd /opt/github/velxio/backend
+cd backend
 pkill -9 -f Renode.dll 2>/dev/null
 python3 -u test_stm32_framebuffer.py
 ```
@@ -104,13 +104,13 @@ I primi 16 byte devono essere la sequenza `i*73 (mod 65536)` little-endian:
 
 ### 3.1 Avvia il backend
 ```bash
-cd /opt/github/velxio/backend
+cd backend
 uvicorn app.main:app --reload --port 8001
 ```
 
 ### 3.2 Avvia il frontend
 ```bash
-cd /opt/github/velxio/frontend
+cd frontend
 npm run dev
 ```
 

@@ -1,14 +1,17 @@
 :name: STM32H7_CORE VELXIO interactive REPL
 :description: Interactive boot. USART1 exposed on TCP port 3456 (telnet-style).
+:description: Run Renode from the root of the repo: the paths are relative to it.
 
-$bin?=@/opt/github/velxio/prebuilt/stm32h7/firmware.elf
+$bin?=@prebuilt/stm32h7/firmware.elf
+# Renode runs from its own directory: logs go to an absolute path.
+$renodelog?="/tmp/renode_velxio_repl.log"
 
 using sysbus
 mach create "h743_velxio"
-machine LoadPlatformDescription @/opt/github/velxio/renode/platforms/stm32h7_core_v13.repl
+machine LoadPlatformDescription @renode/platforms/stm32h7_core_v13.repl
 
 logLevel 3
-logFile @/opt/github/velxio/renode/logs/renode_repl.log true
+logFile $renodelog true
 logLevel -1 sysbus.usart1
 
 # Expose USART1 on TCP port 3456 (no telnet protocol, raw)

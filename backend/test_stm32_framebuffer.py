@@ -18,7 +18,7 @@ import logging
 import sys
 import time
 
-sys.path.insert(0, '/opt/github/velxio/backend')
+sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 
 logging.basicConfig(
     level=logging.INFO,
