@@ -183,7 +183,10 @@ export class Stm32H7Bridge {
   connect(): void {
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) return;
 
-    const base = API_BASE();
+    // A relative base ('/api', behind a proxy on the page's own origin, as in
+    // Codespaces) is made absolute on the page's host and scheme.
+    let base = API_BASE();
+    if (base.startsWith('/') && typeof window !== 'undefined') base = window.location.origin + base;
     const wsProtocol = base.startsWith('https') ? 'wss:' : 'ws:';
     // Same client id as the other backend bridges: two tabs with a board of
     // the same id must not share (and stop) one Renode instance.

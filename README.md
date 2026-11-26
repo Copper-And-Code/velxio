@@ -14,6 +14,14 @@ An open-source multi-board emulator and circuit simulator. Write Arduino C++, Mi
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge)](LICENSE)
 [![Commercial License](https://img.shields.io/badge/Commercial%20License-Available-green?style=for-the-badge)](COMMERCIAL_LICENSE.md)
 
+
+> **Copper and Code fork.** This repository is a fork of [Velxio](https://github.com/davidmonterocrespo24/velxio)
+> (AGPLv3) that adds the **STM32H743 Core** board (MicroPython + LVGL, 1024x600 LTDC panel,
+> emulated in Renode) and the Copper and Code Studio examples. It is not an official Velxio build.
+> Try it in the browser, nothing to install:
+> [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Copper-And-Code/velxio?ref=stm32h7-renode)
+> (the editor opens on port 5173; see `.devcontainer/README.md`). Credits and licenses: `/credits` in the app.
+
 ---
 
 [![Product Hunt](https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1092514&theme=dark&t=1772998619179)](https://www.producthunt.com/products/velxio)

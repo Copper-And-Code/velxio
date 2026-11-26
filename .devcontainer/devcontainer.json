@@ -1,0 +1,27 @@
+// Copper-And-Code/velxio in GitHub Codespaces (or any devcontainer host):
+// the backend (FastAPI + Renode for the STM32H743 Core + arduino-cli for the
+// AVR boards) and the Vite frontend, started together. Open the forwarded
+// port 5173 ("Velxio") in the browser.
+//
+// What runs here: the STM32H743 Core (Renode), Arduino Uno/Nano/Mega and
+// ATtiny85, Raspberry Pi Pico, circuits. Not the ESP32 family: their QEMU
+// libraries are not part of this setup (docs/BUILD-QEMU.md).
+{
+  "name": "Velxio (Copper and Code fork)",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  // Renode runs one emulated STM32H743 per Run: 4 cores keep it near real time.
+  "hostRequirements": { "cpus": 4, "memory": "8gb" },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "forwardPorts": [5173, 8001],
+  "portsAttributes": {
+    "5173": { "label": "Velxio", "onAutoForward": "openBrowser" },
+    "8001": { "label": "Backend API", "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "codespaces": { "openFiles": [".devcontainer/README.md"] }
+  }
+}

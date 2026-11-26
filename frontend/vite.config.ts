@@ -74,6 +74,9 @@ export default defineConfig(({ command }) => ({
       '/api': {
         target: 'http://127.0.0.1:8001',
         changeOrigin: true,
+        // The simulation WebSockets too, for a frontend whose API base is the
+        // relative /api (VITE_API_BASE=/api, as in the Codespaces setup).
+        ws: true,
       },
     },
   },
