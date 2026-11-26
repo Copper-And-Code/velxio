@@ -28,6 +28,17 @@ import { studioStm32h7Examples } from './examples-studio-stm32h7';
 import { esp32_4848s040Examples } from './examples-esp32-4848s040';
 import { studioEsp32_4848s040Examples } from './examples-studio-esp32-4848s040';
 import { waveshareRp2350Lcd4Examples } from './examples-waveshare-rp2350-lcd4';
+import { studioWaveshareRp2350Lcd4Examples } from './examples-studio-waveshare-rp2350-lcd4';
+
+/**
+ * Studio network apps (an FTP server, a photo frame fed over HTTP) need `socket`:
+ * the Waveshare RP2350-Touch-LCD-4 has no radio, nor its firmware the module, on
+ * the board as in the emulator. Not in its gallery.
+ */
+export const WAVESHARE_RP2350_NETWORK_APPS: ReadonlySet<string> = new Set([
+  'studio-waveshare-rp2350-lcd4-ftp-server',
+  'studio-waveshare-rp2350-lcd4-photo-frame',
+]);
 import eeprom24c01C from '../components/customChips/examples/eeprom-24c01.c?raw';
 import eeprom24c01J from '../components/customChips/examples/eeprom-24c01.chip.json?raw';
 
@@ -12963,6 +12974,7 @@ export const exampleProjects: ExampleProject[] = [
   ...esp32_4848s040Examples,
   ...studioEsp32_4848s040Examples,
   ...waveshareRp2350Lcd4Examples,
+  ...studioWaveshareRp2350Lcd4Examples.filter((e) => !WAVESHARE_RP2350_NETWORK_APPS.has(e.id)),
 ];
 
 // Get examples by category

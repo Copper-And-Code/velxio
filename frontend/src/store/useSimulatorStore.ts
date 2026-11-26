@@ -2577,7 +2577,13 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
     } else if (usesPanelMpyBridge(boardKind)) {
       const bridge =
         boardKind === 'waveshare-rp2350-lcd4'
-          ? new Stm32H7Bridge(id, null, { prefix: 'rp2350_', board: 'waveshare-rp2350-lcd4' })
+          ? // With its 8 MB PSRAM (the U9 footprint fitted): 480x480, which the
+            // Copper and Code Studio apps for this board are made for.
+            new Stm32H7Bridge(id, null, {
+              prefix: 'rp2350_',
+              board: 'waveshare-rp2350-lcd4',
+              startData: { psram: true },
+            })
           : new Stm32H7Bridge(id);
       bridge.onSerialData = serialCallback;
       bridge.onError = makeRunRefusedHandler(id, boardKind, serialCallback, () =>

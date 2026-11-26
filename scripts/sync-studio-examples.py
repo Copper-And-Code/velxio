@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Copper and Code Studio examples -> Velxio gallery examples for a panel board:
-the STM32H743 Core (default) or the ESP32-4848S040 (--profile esp32_4848s040_480).
+the STM32H743 Core (default), the ESP32-4848S040 (--profile esp32_4848s040_480) or
+the Waveshare RP2350-Touch-LCD-4 (--profile waveshare_rp2350_touch_lcd_4_240).
 
 For every project in <studio>/examples/*/project.json, runs Studio's own
 generator for the board (`generate --target board --board-profile
@@ -40,6 +41,9 @@ TARGETS = {
                                    'studioStm32h7Examples', 'the STM32H743 Core 1024x600 panel'),
     'esp32_4848s040_480': ('esp32-4848s040', 'examples-studio-esp32-4848s040.ts',
                            'studioEsp32_4848s040Examples', 'the ESP32-4848S040 480x480 panel'),
+    'waveshare_rp2350_touch_lcd_4_240': ('waveshare-rp2350-lcd4', 'examples-studio-waveshare-rp2350-lcd4.ts',
+                                         'studioWaveshareRp2350Lcd4Examples',
+                                         'the Waveshare RP2350-Touch-LCD-4 panel (480x480, with PSRAM)'),
 }
 # Generated next to the app but not part of what the board runs.
 SKIP_FILES = {'manifest.json', 'sourcemap.json', 'board_profile.json'}

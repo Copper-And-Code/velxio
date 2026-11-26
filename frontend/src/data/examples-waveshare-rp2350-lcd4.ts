@@ -1,8 +1,8 @@
 /**
  * Waveshare RP2350-Touch-LCD-4 (waveshare-rp2350-lcd4) gallery examples: MicroPython +
  * LVGL on its 4" panel, running the board's VELXIO firmware on our QEMU's raspi-pico2
- * machine. `import display_driver` starts the panel (240x240 shown 2x2, as on the
- * board as sold without PSRAM), LVGL, the GT911 touch (the canvas) and a background
+ * machine. `import display_driver` starts the panel (480x480: Velxio fits the board's
+ * optional 8 MB PSRAM), LVGL, the GT911 touch (the canvas) and a background
  * lv.timer_handler().
  */
 import type { ExampleProject } from './examples';
@@ -12,7 +12,7 @@ const TOUCH_DEMO = `# Waveshare RP2350-Touch-LCD-4 + LVGL: a button and a slider
 import lvgl as lv
 import display_driver
 
-W, H = display_driver.WIDTH, display_driver.HEIGHT   # 240x240 (480x480 with PSRAM)
+W, H = display_driver.WIDTH, display_driver.HEIGHT   # 480x480 (240x240 without PSRAM)
 
 scr = lv.screen_active()
 scr.set_style_bg_color(lv.color_hex(0x12261c), 0)

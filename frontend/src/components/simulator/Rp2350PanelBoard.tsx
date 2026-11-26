@@ -4,7 +4,7 @@
  * (backend rp2350_qemu.py).
  *
  * The bridge is Stm32H7Bridge on the `rp2350_` lane: the same `framebuffer`
- * events (RGB565; 240x240 shown 2x2 on the board as sold, 480x480 with PSRAM).
+ * events (RGB565; 480x480 with the PSRAM Velxio fits, 240x240 shown 2x2 without).
  * The screen is the touch: a pointer on it becomes the GT911's point, in panel
  * coordinates (0-479).
  */
