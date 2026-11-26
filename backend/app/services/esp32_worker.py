@@ -920,6 +920,10 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         b'-L', rom_dir,
         b'-drive', f'file={firmware_path},if=mtd,format=raw'.encode(),
     ]
+    # Board options the machine cannot guess, from the config: e.g. the
+    # ESP32-4848S040's 8 MB octal PSRAM on esp32s3-picsimlab
+    # (['-m', '8M', '-global', 'ssi_psram.is_octal=true']).
+    args_list.extend(str(a).encode() for a in cfg.get('extra_args', []))
 
     # Deterministic instruction counting for stable timers. Always on for the
     # ESP32-C3 (RISC-V needs deterministic timing to boot); on the Xtensa
