@@ -16,11 +16,40 @@ An open-source multi-board emulator and circuit simulator. Write Arduino C++, Mi
 
 
 > **Copper and Code fork.** This repository is a fork of [Velxio](https://github.com/davidmonterocrespo24/velxio)
-> (AGPLv3) that adds the **STM32H743 Core** board (MicroPython + LVGL, 1024x600 LTDC panel,
-> emulated in Renode) and the Copper and Code Studio examples. It is not an official Velxio build.
+> (AGPLv3) that adds three panel boards running MicroPython + LVGL (STM32H743 Core, ESP32-4848S040,
+> Waveshare RP2350-Touch-LCD-4), the Copper and Code Studio examples, a 3D World and video recording.
+> It is not an official Velxio build: see [What this fork adds](#copper-and-code-fork-what-this-fork-adds).
 > Try it in the browser, nothing to install:
 > [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Copper-And-Code/velxio?ref=stm32h7-renode)
 > (the editor opens on port 5173; see `.devcontainer/README.md`). Credits and licenses: `/credits` in the app.
+
+## Copper and Code fork: what this fork adds
+
+**Boards** (panel boards of [copper-and-code-mcu-boards](https://github.com/Copper-And-Code/copper-and-code-mcu-boards), each running the `VELXIO` variant of its firmware: MicroPython 1.29 + LVGL)
+
+| Board | Emulated by | Screen and touch | Notes |
+|---|---|---|---|
+| STM32H743 Core V1.3 (`stm32h7-core-v13`) | [Renode](https://renode.io) | 1024x600 LTDC, GT911 | 32 MB SDRAM; `/flash` is a littlefs in RAM |
+| ESP32-4848S040 (`esp32-4848s040`) | QEMU `esp32s3-picsimlab`, [Copper-And-Code/qemu-picsimlab](https://github.com/Copper-And-Code/qemu-picsimlab) | 480x480 RGB, GT911 | 8 MB octal PSRAM; **WiFi** to the Internet through the emulated `Velxio-GUEST` access point |
+| Waveshare RP2350-Touch-LCD-4 (`waveshare-rp2350-lcd4`) | QEMU `raspi-pico2`, [Copper-And-Code/qemu-rp2040-pico](https://github.com/Copper-And-Code/qemu-rp2040-pico) | 480x480 RGB, GT911 | started with 8 MB PSRAM, so the Studio apps run at 480x480; no radio, as the real board |
+
+The screen on the canvas is the touch panel: click it. The ESP32-S3 machine and its WiFi, and the RP2350 machine, are this fork's own QEMU work (GPL-2.0, sources above).
+
+**Examples.** The Copper and Code Studio apps for each board (`scripts/sync-studio-examples.py`), in the gallery next to Velxio's.
+
+**3D World.** The **3D** button of the canvas header shows the project's `world.html` over the circuit: a three.js (or 2D) page in a sandboxed iframe that sees the circuit only through `window.velxio`: LEDs, servos, buttons, sensors, the board screens as live textures you can touch, and `.glb` models added as World files. It follows the public `world/1` API of velxio.dev; see [docs/wiki/world.md](docs/wiki/world.md).
+
+**Recording.** The **REC** button records the simulator panel (the canvas or the World, and the serial monitor) to an MP4/WebM video, with the tab's audio.
+
+**Binaries.** The QEMU builds and the VELXIO firmwares are not in git: they are release assets of the repositories they are built from, pinned with their SHA-256 in `scripts/prebuilt.lock`. Fetch them once (Linux x86_64):
+
+```bash
+scripts/fetch-prebuilt.sh      # -> prebuilt/qemu, prebuilt/rp2350, prebuilt/stm32h7, frontend/public/firmware
+```
+
+then run the backend and the frontend as in [Option C](#option-c-manual-setup-frontend--backend-separately) (Renode for the STM32H743 Core: [docs/STM32H7_MANUAL_TEST.md](docs/STM32H7_MANUAL_TEST.md)), or `docker build -f Dockerfile.standalone .`, which copies `prebuilt/` into the image. How the binaries are built and where their sources are: [docs/BUILD-QEMU.md](docs/BUILD-QEMU.md).
+
+**Branches.** `stm32h7-renode` (the default) carries this work; `master` follows upstream Velxio.
 
 ---
 

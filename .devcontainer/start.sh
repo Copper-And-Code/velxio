@@ -10,6 +10,8 @@ pkill -f "uvicorn app.main:app --host 127.0.0.1 --port 8001" 2>/dev/null || true
 pkill -f "vite --host 0.0.0.0 --port 5173" 2>/dev/null || true
 sleep 1
 
+# The ESP32 libraries and ROMs that scripts/fetch-prebuilt.sh put in prebuilt/qemu.
+export VELXIO_QEMU_PATH=$PWD/prebuilt/qemu
 (cd backend && nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 \
   > /tmp/velxio-backend.log 2>&1 &)
 # The browser reaches only the forwarded port 5173: every API call and the
