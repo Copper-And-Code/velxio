@@ -2201,6 +2201,46 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         name='esp32-chip-fb-flush',
     ).start()
 
+    # The board's own panel (esp32s3-picsimlab's esp_rgb display, which a
+    # board's VELXIO firmware draws on): read when the guest completed a new
+    # picture, at most every _PANEL_PERIOD_S, and sent whole as a
+    # `framebuffer` event in the format the STM32H7 bridge uses (rgb565 or
+    # xrgb8888, little-endian rows). A libqemu without the call has no panel.
+    _PANEL_PERIOD_S = 0.05
+    _get_fb = getattr(lib, 'qemu_picsimlab_get_framebuffer', None)
+
+    def _panel_loop():
+        u32 = ctypes.c_uint32
+        w, h, bpp, serial = u32(), u32(), u32(), u32()
+        last = None
+        while not _stopped.is_set():
+            _stopped.wait(_PANEL_PERIOD_S)
+            if _stopped.is_set():
+                break
+            data = None
+            if _lock_iothread:
+                _lock_iothread(b'esp32_worker.py', 0)
+            try:
+                ptr = _get_fb(ctypes.byref(w), ctypes.byref(h), ctypes.byref(bpp), ctypes.byref(serial))
+                if ptr and serial.value and serial.value != last:
+                    last = serial.value
+                    data = ctypes.string_at(ptr, w.value * h.value * bpp.value // 8)
+            except Exception as e:  # noqa: BLE001 - keep the panel loop alive
+                _log(f'[panel] read error: {e!r}')
+            finally:
+                if _unlock_iothread:
+                    _unlock_iothread()
+            if data is not None:
+                fmt = 'rgb565' if bpp.value == 16 else 'xrgb8888'
+                _emit({'type': 'framebuffer', 'width': w.value, 'height': h.value,
+                       'pitch': w.value * bpp.value // 8, 'format': fmt,
+                       'bytes_b64': base64.b64encode(data).decode('ascii')})
+
+    if _get_fb is not None:
+        _get_fb.restype = ctypes.c_void_p
+        _get_fb.argtypes = [ctypes.POINTER(ctypes.c_uint32)] * 4
+        threading.Thread(target=_panel_loop, daemon=True, name='esp32-panel').start()
+
     # ── SPI arbitration (project board-buses-2026-09, F4) ─────────────────
 
     def _spi_unit(qemu_id: int) -> int:
