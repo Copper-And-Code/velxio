@@ -9,6 +9,7 @@ import { isPiBoardKind } from '../types/board';
 import { useEditorStore, chipFileGroupId, CHIP_GROUP_PREFIX } from '../store/useEditorStore';
 import { useSimulatorStore, DEFAULT_BOARD_POSITION } from '../store/useSimulatorStore';
 import { useElectricalStore } from '../store/useElectricalStore';
+import { useWorldStore } from '../world/useWorldStore';
 import { useOscilloscopeStore } from '../store/useOscilloscopeStore';
 import { useProjectStore } from '../store/useProjectStore';
 import { useVfsStore } from '../store/useVfsStore';
@@ -130,6 +131,9 @@ export async function loadExample(
   // Nor may the scope keep watching the previous circuit's nets and pins
   // under their old labels (velxio/velxio-prod#119).
   useOscilloscopeStore.getState().resetChannels();
+  // The example's World, or none (never the previous project's).
+  useWorldStore.getState().load(example.world ?? null);
+  if (example.world?.html && example.world.open) useWorldStore.getState().setOpen(true);
 
   // Auto-install required libraries. A deployment that seeds every gallery
   // library at boot says so on /health and the round-trips are skipped; an

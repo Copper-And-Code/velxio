@@ -16,6 +16,8 @@ import { FileExplorer } from '../components/editor/FileExplorer';
 import { CompilationConsole } from '../components/editor/CompilationConsole';
 import { CompileProgressCard } from '../components/editor/CompileProgressCard';
 import { SimulatorCanvas } from '../components/simulator/SimulatorCanvas';
+import { WorldPanel } from '../components/world/WorldPanel';
+import { useWorldStore } from '../world/useWorldStore';
 import { SerialMonitor } from '../components/simulator/SerialMonitor';
 import { Oscilloscope } from '../components/simulator/Oscilloscope';
 import { AppHeader } from '../components/layout/AppHeader';
@@ -269,6 +271,7 @@ export const EditorPage: React.FC = () => {
   // card has to move to the editor pane instead of disappearing with it.
   const simulatorHidden =
     (isMobile && mobileView !== 'circuit') || (!isMobile && viewMode === 'code');
+  const worldOpen = useWorldStore((s) => s.open);
 
   // Save is dispatched to the pro overlay, which inspects auth state and
   // shows the right modal (Save vs Login prompt). In OSS without the
@@ -793,6 +796,7 @@ export const EditorPage: React.FC = () => {
         >
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
             <SimulatorCanvas headerSlot={!isMobile ? canvasHeaderSlot : null} />
+            {worldOpen && !simulatorHidden && <WorldPanel />}
             {/* Guarded rather than left to `display: none` on the panel: a
                 hidden copy still keeps its 100ms timer running and duplicates
                 the aria-live region a screen reader reads out. */}

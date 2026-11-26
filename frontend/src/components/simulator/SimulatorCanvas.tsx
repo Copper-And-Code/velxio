@@ -21,6 +21,7 @@ import { remoteBoardActions } from '../../simulation/remoteBoardAutostart';
 import React, { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useWorldStore } from '../../world/useWorldStore';
 import { ComponentPickerModal } from '../ComponentPickerModal';
 import { PartInspectorDialog, type InspectorAction } from './PartInspectorDialog';
 import { CustomChipDialog } from '../customChips/CustomChipDialog';
@@ -285,6 +286,7 @@ interface SimulatorCanvasProps {
 
 export const SimulatorCanvas = ({ headerSlot }: SimulatorCanvasProps = {}) => {
   const { t } = useTranslation();
+  const worldOpen = useWorldStore((s) => s.open);
   const isTouchDevice = useIsCoarsePointer();
   // Mirror to a ref so the long-lived touch handler effect (deps deliberately
   // narrow to avoid rebinding listeners on every render) can read the latest
@@ -3211,6 +3213,32 @@ export const SimulatorCanvas = ({ headerSlot }: SimulatorCanvasProps = {}) => {
                     <path d="M8 21h8M12 17v4" />
                   </svg>
                   {t('editor.canvas.serial')}
+                </button>
+
+                {/* World: the project's world.html (3D/2D scene) over the canvas */}
+                <button
+                  onClick={() => {
+                    const w = useWorldStore.getState();
+                    w.setOpen(!w.open);
+                  }}
+                  className={`canvas-serial-btn${worldOpen ? ' canvas-serial-btn-active' : ''}`}
+                  title={t('editor.world.toggleTitle')}
+                  data-testid="world-toggle"
+                >
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 2 3 7v10l9 5 9-5V7z" />
+                    <path d="M3 7l9 5 9-5M12 12v10" />
+                  </svg>
+                  3D
                 </button>
 
                 {/* Header toggles for COMPONENT-owned webcams (vision sensors

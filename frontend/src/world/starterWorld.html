@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #15171a; color: #dde; font: 12px system-ui, sans-serif; }
+    body.light { background: #eef0f3; color: #223; }
+    #hud { position: absolute; left: 8px; top: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,.45); color: #eee; max-width: 46%; pointer-events: none; white-space: pre; line-height: 1.45; }
+    #hint { position: absolute; right: 8px; bottom: 8px; opacity: .7; }
+    canvas { display: block; }
+  </style>
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <div id="hud">waiting for Velxio…</div>
+  <div id="hint">drag: orbit · wheel: zoom · click a screen to touch it, a button to press it</div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const info = await velxio.ready();
+    const hud = document.getElementById('hud');
+
+    // ── Scene ──────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+    camera.position.set(0, 0.55, 0.9);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.12, 0);
+    controls.enableDamping = true;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(0.6, 1.2, 0.8);
+    scene.add(sun);
+    const desk = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.03, 0.9), new THREE.MeshStandardMaterial({ color: 0x6b5139, roughness: 0.8 }));
+    desk.position.y = -0.015;
+    scene.add(desk);
+
+    function applyTheme(theme) {
+      document.body.classList.toggle('light', theme === 'light');
+      scene.background = new THREE.Color(theme === 'light' ? 0xdfe3e8 : 0x15171a);
+    }
+    applyTheme(info.theme);
+    velxio.on('theme', applyTheme);
+
+    // ── Screens: every board or part with a display, on a stand ────────
+    const clickable = [];   // meshes the pointer can touch or press
+    const screens = [...info.boards, ...info.parts].filter((x) => x.display);
+    screens.forEach((s, i) => {
+      const { w, h } = s.display;
+      const width = w >= h ? 0.3 * Math.min(1.8, w / h) : 0.3 * w / h;
+      const height = width * h / w;
+      const group = new THREE.Group();
+      group.position.set((i - (screens.length - 1) / 2) * (width + 0.12), height / 2 + 0.06, -0.15);
+      const bezel = new THREE.Mesh(new THREE.BoxGeometry(width + 0.03, height + 0.03, 0.02), new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.5 }));
+      bezel.position.z = -0.011;
+      group.add(bezel);
+      const canvas = velxio.display(s.id, { fps: 20 });
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: tex }));
+      glass.userData = { kind: 'screen', id: s.id, w, h, touch: !!s.display.touch };
+      group.add(glass);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, group.position.y), new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.6 }));
+      leg.position.set(0, -group.position.y / 2, -0.03);
+      group.add(leg);
+      group.rotation.x = -0.12;
+      group.userData.frame = true;
+      scene.add(group);
+      clickable.push(glass);
+      velxio.on('display:' + s.id, () => { tex.needsUpdate = true; });
+    });
+
+    // ── Parts in a row in front: LEDs, servos, steppers, buttons ────────
+    const visuals = {};
+    const row = info.parts.filter((p) => p.outputs.length || p.press);
+    row.forEach((p, i) => {
+      const x = (i - (row.length - 1) / 2) * 0.09;
+      const g = new THREE.Group();
+      g.position.set(x, 0, 0.22);
+      g.userData.frame = true;
+      scene.add(g);
+      let v = { type: p.type };
+      if (p.type === 'led' || p.type === 'rgb-led' || p.type === 'buzzer') {
+        const mat = new THREE.MeshStandardMaterial({ color: 0x552222, emissive: 0x000000, roughness: 0.3, transparent: true, opacity: 0.92 });
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.018, 24, 16), mat);
+        bulb.position.y = 0.03;
+        const light = new THREE.PointLight(0xff3020, 0, 0.4);
+        light.position.y = 0.05;
+        g.add(bulb, light);
+        v = { ...v, mat, light };
+      } else if (p.type === 'servo' || p.type.includes('stepper')) {
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), new THREE.MeshStandardMaterial({ color: p.type === 'servo' ? 0x2255aa : 0x333333 }));
+        body.position.y = 0.015;
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.004, 0.008), new THREE.MeshStandardMaterial({ color: 0xeeeeee }));
+        arm.geometry.translate(0.02, 0, 0);
+        arm.position.y = 0.033;
+        g.add(body, arm);
+        v = { ...v, arm };
+      } else if (p.press) {
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.01, 0.03), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        base.position.y = 0.005;
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.01, 20), new THREE.MeshStandardMaterial({ color: 0xcc3333 }));
+        cap.position.y = 0.015;
+        cap.userData = { kind: 'button', id: p.id };
+        g.add(base, cap);
+        clickable.push(cap);
+        v = { ...v, cap };
+      }
+      visuals[p.id] = v;
+    });
+
+    // ── Frame what is on the desk ───────────────────────────────────────
+    function frameAll() {
+      scene.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      scene.children.forEach((o) => { if (o.userData.frame) box.expandByObject(o); });
+      if (box.isEmpty()) return;
+      const c = box.getCenter(new THREE.Vector3());
+      const span = Math.max(0.25, box.max.x - box.min.x, (box.max.y - box.min.y) * 1.6);
+      controls.target.set(c.x, c.y * 0.85, c.z);
+      camera.position.set(c.x, c.y + span * 0.45, c.z + span * 1.25 + 0.1);
+    }
+    frameAll();
+
+    // ── An optional model: the first .glb among the World's files ──────
+    const files = await velxio.assets();
+    const model = files.find((f) => /\.(glb|gltf)$/i.test(f.name));
+    if (model) {
+      new GLTFLoader().load(await velxio.asset(model.name), (gltf) => {
+        const obj = gltf.scene;
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = box.getSize(new THREE.Vector3()).length() || 1;
+        obj.scale.setScalar(0.35 / size);
+        const b2 = new THREE.Box3().setFromObject(obj);
+        const right = new THREE.Box3();
+        scene.children.forEach((o) => { if (o.userData.frame) right.expandByObject(o); });
+        obj.position.set((right.isEmpty() ? 0 : right.max.x) + 0.25, -b2.min.y, 0.1);
+        obj.userData.frame = true;
+        scene.add(obj);
+        frameAll();
+        console.log('model', model.name, 'loaded');
+      }, undefined, (e) => console.error('model', model.name, e));
+    }
+
+    // ── Pointer: touch a screen, press a button ────────────────────────
+    const ray = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let held = null;   // { kind, id, w, h }
+    function pick(e) {
+      const r = renderer.domElement.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      return ray.intersectObjects(clickable, false)[0] || null;
+    }
+    function touchAt(hit, pressed) {
+      const d = hit.object.userData;
+      held.x = hit.uv.x * d.w;
+      held.y = (1 - hit.uv.y) * d.h;
+      velxio.touch(d.id, held.x, held.y, pressed);
+    }
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      const hit = pick(e);
+      if (!hit) return;
+      const d = hit.object.userData;
+      if (d.kind === 'screen' && d.touch) { held = { ...d }; controls.enabled = false; touchAt(hit, true); }
+      if (d.kind === 'button') { held = { ...d }; controls.enabled = false; velxio.press(d.id); }
+    });
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (!held || held.kind !== 'screen') return;
+      const hit = pick(e);
+      if (hit && hit.object.userData.id === held.id) touchAt(hit, true);
+    });
+    addEventListener('pointerup', () => {
+      if (!held) return;
+      if (held.kind === 'screen') velxio.touch(held.id, held.x, held.y, false);
+      if (held.kind === 'button') velxio.release(held.id);
+      held = null;
+      controls.enabled = true;
+    });
+
+    // ── Frames: the circuit moves the scene ─────────────────────────────
+    let last = null;
+    velxio.onFrame((f) => {
+      last = f;
+      for (const [id, v] of Object.entries(visuals)) {
+        const o = f.parts[id];
+        if (!o) continue;
+        if (v.mat) {
+          const on = !!o.on;
+          const k = v.type === 'buzzer' ? (on ? 1 : 0) : (o.brightness ?? (on ? 1 : 0));
+          const c = v.type === 'rgb-led' ? new THREE.Color(o.r, o.g, o.b) : new THREE.Color(v.type === 'buzzer' ? 0x40a0ff : 0xff3020);
+          v.mat.emissive.copy(c).multiplyScalar(on ? Math.max(0.15, k) : 0);
+          v.light.color.copy(c);
+          v.light.intensity = on ? 0.6 * Math.max(0.15, k) : 0;
+        }
+        if (v.arm && typeof o.angle === 'number') v.arm.rotation.y = -o.angle * Math.PI / 180;
+      }
+    });
+    velxio.on('reset', () => console.log('firmware restarted'));
+
+    // ── Draw ────────────────────────────────────────────────────────────
+    let visible = true;
+    velxio.on('visibility', (v) => { visible = v; });
+    function resize() {
+      renderer.setSize(innerWidth, innerHeight, false);
+      renderer.domElement.style.width = innerWidth + 'px';
+      renderer.domElement.style.height = innerHeight + 'px';
+      camera.aspect = innerWidth / Math.max(1, innerHeight);
+      camera.updateProjectionMatrix();
+    }
+    addEventListener('resize', resize);
+    resize();
+    renderer.setAnimationLoop(() => {
+      if (!visible) return;
+      controls.update();
+      renderer.render(scene, camera);
+      const lines = [last && last.running ? `running · t = ${last.t.toFixed(2)} s` : 'stopped (press Run)'];
+      lines.push(`${info.boards.length} board(s), ${info.parts.length} part(s)`);
+      if (!screens.length && !row.length) lines.push('no screen, LED, servo or button on the canvas yet');
+      hud.textContent = lines.join('\n');
+    });
+  </script>
+</body>
+</html>

@@ -512,6 +512,26 @@
       "revision": "Revisione della scheda reale",
       "saveToDrive": "Copia sull'unita della scheda",
       "savedToDrive": "{{file}} copiato su {{drive}}. La scheda si riavvia con il tuo sketch."
+    },
+    "world": {
+      "title": "World",
+      "scene": "Scena",
+      "run": "Esegui",
+      "runTitle": "Ricarica il World con l'HTML attuale",
+      "toggleTitle": "World: il circuito in una scena 3D o 2D (world.html)",
+      "editStarter": "Modifica l'esempio base",
+      "editStarterTitle": "Copia il World di partenza nel progetto per modificarlo",
+      "starterNote": "Questo è il World di partenza. Modificalo e diventa il world.html del progetto; Esegui ricarica la scena.",
+      "files": "File",
+      "noFiles": "Nessun file.",
+      "addFile": "Aggiungi file…",
+      "removeFile": "Rimuovi",
+      "filesHint": "Modelli (.glb), texture e suoni che la pagina carica con await velxio.asset('nome'). Vengono salvati con il progetto.",
+      "fileTooBig": "{{name}} supera i 24 MB e non è stato aggiunto",
+      "log": "Log",
+      "logTitle": "console.* ed errori della pagina World",
+      "emptyLog": "Ancora nessun messaggio.",
+      "close": "Chiudi il World"
     }
   },
   "about": {

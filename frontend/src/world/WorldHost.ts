@@ -1,0 +1,265 @@
+/**
+ * Velxio's side of the World link: answers the page in the iframe
+ * (worldRuntime.ts) from the simulator store and the canvas.
+ *
+ *   frames    about 125 per second: t/dt (seconds the boards have run since
+ *             Run, paused while stopped), running, every part's outputs read
+ *             from its canvas element;
+ *   set       a sensor's inputs, clamped, through dispatchSensorUpdate (the
+ *             same path as the sensor panel's sliders);
+ *   press     a pushbutton, through the element's button-press/release events;
+ *   display   copies of a screen's canvas (a panel board's, an ILI9341's) as
+ *             ImageBitmaps, at the fps the page asks for;
+ *   touch     a panel board's touch controller, in panel pixels;
+ *   asset     a World file's bytes.
+ */
+import { getEsp32Bridge, getStm32H7Bridge, useSimulatorStore } from '../store/useSimulatorStore';
+import { dispatchSensorUpdate } from '../simulation/SensorUpdateRegistry';
+import { b64ToBuffer, useWorldStore } from './useWorldStore';
+import {
+  BOARD_DISPLAYS,
+  clampInputs,
+  describeWorld,
+  PRESS_PARTS,
+  readPartOutputs,
+  type WorldInfo,
+} from './worldCatalog';
+import { WORLD_CHANNEL } from './worldRuntime';
+
+export interface WorldLogEntry {
+  level: string;
+  text: string;
+  at: number;
+}
+
+const FRAME_MS = 8;
+const ESP32_PANEL_TOUCH_PIN = 19;
+
+function currentTheme(): 'dark' | 'light' {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+/** The <canvas> a board or part draws its screen on. */
+function screenCanvas(id: string): HTMLCanvasElement | null {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  if (el instanceof HTMLCanvasElement) return el;
+  const own = el.shadowRoot?.querySelector('canvas') ?? el.querySelector('canvas');
+  return (own as HTMLCanvasElement | null) ?? null;
+}
+
+export class WorldHost {
+  private win: Window;
+  private timer: number | null = null;
+  private displayTimers = new Map<string, number>();
+  private info: WorldInfo | null = null;
+  private infoKey = '';
+  private t = 0;
+  private lastTick = 0;
+  private wasRunning = false;
+  private pressed = new Set<string>();
+  private themeObserver: MutationObserver | null = null;
+  private unsubStore: (() => void) | null = null;
+  private onMessage = (e: MessageEvent) => this.handle(e);
+  /** console.* and errors of the page. */
+  onLog: ((entry: WorldLogEntry) => void) | null = null;
+  onTelemetry: ((data: Record<string, unknown>) => void) | null = null;
+
+  constructor(win: Window) {
+    this.win = win;
+    window.addEventListener('message', this.onMessage);
+    this.themeObserver = new MutationObserver(() => {
+      if (this.info && this.info.theme !== currentTheme()) {
+        this.info.theme = currentTheme();
+        this.notify('theme', this.info.theme);
+      }
+    });
+    this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // A part added or removed while the World runs: tell the page.
+    this.unsubStore = useSimulatorStore.subscribe((s, prev) => {
+      if (s.components === prev.components && s.boards === prev.boards && s.wires === prev.wires) return;
+      const before = this.infoKey;
+      this.refreshInfo();
+      if (this.infoKey !== before) this.notify('parts', this.info);
+    });
+  }
+
+  dispose(): void {
+    window.removeEventListener('message', this.onMessage);
+    if (this.timer !== null) window.clearInterval(this.timer);
+    for (const t of this.displayTimers.values()) window.clearInterval(t);
+    this.displayTimers.clear();
+    for (const id of this.pressed) this.release(id);
+    this.themeObserver?.disconnect();
+    this.unsubStore?.();
+  }
+
+  setVisible(visible: boolean): void {
+    this.notify('visibility', visible);
+  }
+
+  private refreshInfo(): WorldInfo {
+    const s = useSimulatorStore.getState();
+    this.info = describeWorld(s.boards, s.components, s.wires, currentTheme());
+    this.infoKey = JSON.stringify(this.info.boards) + JSON.stringify(this.info.parts);
+    return this.info;
+  }
+
+  private post(msg: Record<string, unknown>, transfer: Transferable[] = []): void {
+    try {
+      this.win.postMessage({ ...msg, velxio: WORLD_CHANNEL }, '*', transfer);
+    } catch {
+      /* the iframe was replaced */
+    }
+  }
+
+  private notify(method: string, params: unknown, transfer: Transferable[] = []): void {
+    this.post({ method, params }, transfer);
+  }
+
+  private log(level: string, text: string): void {
+    this.onLog?.({ level, text, at: Date.now() });
+  }
+
+  private handle(e: MessageEvent): void {
+    if (e.source !== this.win) return;
+    const msg = e.data as { velxio?: string; id?: number; method?: string; params?: Record<string, unknown> };
+    if (!msg || msg.velxio !== WORLD_CHANNEL || typeof msg.method !== 'string') return;
+    const p = msg.params ?? {};
+    const reply = (result: unknown, transfer: Transferable[] = []) =>
+      msg.id !== undefined && this.post({ id: msg.id, result }, transfer);
+    const fail = (error: string) => msg.id !== undefined && this.post({ id: msg.id, error });
+    switch (msg.method) {
+      case 'hello':
+        // Repeated until answered: answer each one, the page keeps the first.
+        this.notify('info', this.refreshInfo());
+        this.start();
+        break;
+      case 'set':
+        this.set(String(p.id), (p.values ?? {}) as Record<string, unknown>);
+        break;
+      case 'press':
+        this.press(String(p.id));
+        break;
+      case 'release':
+        this.release(String(p.id));
+        break;
+      case 'touch':
+        this.touch(String(p.id), Number(p.x), Number(p.y), !!p.pressed);
+        break;
+      case 'display':
+        this.subscribeDisplay(String(p.id), Number(p.fps) || 15);
+        break;
+      case 'telemetry':
+        this.onTelemetry?.(p);
+        break;
+      case 'log':
+        this.log(String(p.level ?? 'log'), String(p.text ?? ''));
+        break;
+      case 'asset': {
+        const a = useWorldStore.getState().assets.find((x) => x.name === p.name);
+        if (!a) {
+          fail(`No World file named "${String(p.name)}" (add it with Files in the World panel)`);
+          break;
+        }
+        const buffer = b64ToBuffer(a.b64);
+        reply({ name: a.name, mime: a.mime, buffer }, [buffer]);
+        break;
+      }
+      case 'assets':
+        reply(
+          useWorldStore.getState().assets.map((a) => ({
+            name: a.name,
+            mime: a.mime,
+            size: Math.floor((a.b64.length * 3) / 4) - (a.b64.match(/=*$/)?.[0].length ?? 0),
+          })),
+        );
+        break;
+      default:
+        fail(`Unknown method ${msg.method}`);
+    }
+  }
+
+  private start(): void {
+    if (this.timer !== null) return;
+    this.lastTick = performance.now();
+    this.timer = window.setInterval(() => this.frame(), FRAME_MS);
+  }
+
+  private frame(): void {
+    const now = performance.now();
+    const wall = Math.min(0.1, (now - this.lastTick) / 1000);
+    this.lastTick = now;
+    const s = useSimulatorStore.getState();
+    const running = s.boards.some((b) => b.running);
+    if (running && !this.wasRunning) {
+      this.t = 0;
+      this.notify('reset', null);
+    }
+    this.wasRunning = running;
+    const dt = running ? wall : 0;
+    if (running) this.t += dt;
+    const parts: Record<string, Record<string, number | boolean>> = {};
+    for (const c of s.components) {
+      const out = readPartOutputs(c.metadataId, document.getElementById(c.id));
+      if (out) parts[c.id] = out;
+    }
+    this.notify('frame', { t: running ? this.t : null, dt, running, parts });
+  }
+
+  private set(id: string, values: Record<string, unknown>): void {
+    const part = this.info?.parts.find((x) => x.id === id);
+    if (!part) return;
+    const clamped = clampInputs(part.inputs, values);
+    if (Object.keys(clamped).length) dispatchSensorUpdate(id, clamped);
+  }
+
+  private press(id: string): void {
+    const part = this.info?.parts.find((x) => x.id === id);
+    const el = document.getElementById(id) as (HTMLElement & { pressed?: boolean }) | null;
+    if (!part || !PRESS_PARTS.has(part.type) || !el || this.pressed.has(id)) return;
+    this.pressed.add(id);
+    el.pressed = true;
+    el.dispatchEvent(new Event('button-press'));
+  }
+
+  private release(id: string): void {
+    const el = document.getElementById(id) as (HTMLElement & { pressed?: boolean }) | null;
+    if (!this.pressed.delete(id) || !el) return;
+    el.pressed = false;
+    el.dispatchEvent(new Event('button-release'));
+  }
+
+  private touch(id: string, x: number, y: number, pressed: boolean): void {
+    const board = useSimulatorStore.getState().boards.find((b) => b.id === id);
+    const d = board && BOARD_DISPLAYS[board.boardKind];
+    if (!board || !d || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const tx = Math.round(Math.max(0, Math.min(d.w - 1, x)));
+    const ty = Math.round(Math.max(0, Math.min(d.h - 1, y)));
+    if (board.boardKind === 'esp32-4848s040') {
+      getEsp32Bridge(id)?.sendSensorUpdate(ESP32_PANEL_TOUCH_PIN, { x: tx, y: ty, pressed });
+    } else {
+      getStm32H7Bridge(id)?.sendTouch(tx, ty, pressed);
+    }
+  }
+
+  private subscribeDisplay(id: string, fps: number): void {
+    const old = this.displayTimers.get(id);
+    if (old !== undefined) window.clearInterval(old);
+    const period = 1000 / Math.max(1, Math.min(60, fps));
+    let busy = false;
+    const grab = () => {
+      const src = screenCanvas(id);
+      if (!src || busy || src.width === 0 || src.height === 0) return;
+      busy = true;
+      createImageBitmap(src)
+        .then((bitmap) => this.notify('display', { id, bitmap }, [bitmap]))
+        .catch(() => {})
+        .finally(() => {
+          busy = false;
+        });
+    };
+    this.displayTimers.set(id, window.setInterval(grab, period));
+    grab();
+  }
+}

@@ -35,6 +35,7 @@ import type { Wire } from '../types/wire';
 import { useEditorStore, chipFileGroupId } from '../store/useEditorStore';
 import { useSimulatorStore } from '../store/useSimulatorStore';
 import { useProjectStore } from '../store/useProjectStore';
+import { useWorldStore, type WorldData } from '../world/useWorldStore';
 
 const VLX_FORMAT = 'velxio-project';
 const VLX_VERSION = 1;
@@ -70,6 +71,8 @@ export interface VlxPayload {
   components: Component[];
   wires: Wire[];
   activeBoardId: string | null;
+  /** The project's World (world.html and its files). Absent when empty. */
+  world?: WorldData;
 }
 
 function serialisableBoard(b: BoardInstance) {
@@ -132,6 +135,7 @@ export function buildVlxPayload(opts: { name?: string } = {}): VlxPayload {
     if (folders.length) folderGroups[gid] = folders;
   }
 
+  const world = useWorldStore.getState().snapshot();
   return {
     format: VLX_FORMAT,
     version: VLX_VERSION,
@@ -143,6 +147,7 @@ export function buildVlxPayload(opts: { name?: string } = {}): VlxPayload {
     components: sim.components,
     wires: sim.wires,
     activeBoardId: sim.activeBoardId,
+    ...(world ? { world } : {}),
   };
 }
 
@@ -237,6 +242,10 @@ function validatePayload(data: unknown): VlxPayload {
   if (!Array.isArray(data.wires)) {
     throw new VlxParseError('Missing or invalid "wires" array.');
   }
+  if (data.world !== undefined && !(isPlainObject(data.world) && typeof data.world.html === 'string')) {
+    // Optional field (the World) — drop silently if malformed.
+    delete data.world;
+  }
   return data as unknown as VlxPayload;
 }
 
@@ -281,6 +290,7 @@ export async function importVlxFile(file: File): Promise<VlxPayload> {
     components: payload.components,
     wires: payload.wires,
     activeBoardId: payload.activeBoardId,
+    world: payload.world ?? null,
   });
   return payload;
 }

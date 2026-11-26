@@ -58,7 +58,8 @@ export const ProjectByIdPage: React.FC = () => {
         // Per-board manifests ride in boards_json (buildLoadPayload migrates
         // pre-per-board projects), so loadProjectState restores each board's
         // compile scope directly.
-        loadProjectState(payload);
+        // Server projects carry no World (no column for it yet): start empty.
+        loadProjectState({ ...payload, world: null });
         setCurrentProject({
           id: project.id,
           slug: project.slug,

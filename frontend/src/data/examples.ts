@@ -99,6 +99,9 @@ export interface ExampleProject {
    * Wire componentIds reference these IDs directly.
    */
   boards?: ExampleBoard[];
+  /** The example's World (world.html and its files); `open` shows it over
+   *  the canvas when the example loads. */
+  world?: import('../world/useWorldStore').WorldData & { open?: boolean };
   /** Code for single-board examples (ignored when boards[] is set, or when files[] is provided). */
   code: string;
   /**

@@ -37,6 +37,7 @@ import { blockedByBoardGate, reportBoardRunRefused } from '../lib/proBoardGate';
 import { getSerialTxInterceptor } from '../lib/proHardwareSerial';
 import { boardBox, boardSize, normalizeRotation, normalizeScale } from '../utils/boardGeometry';
 import { calculatePinPosition } from '../utils/pinPositionCalculator';
+import { useWorldStore } from '../world/useWorldStore';
 import { useOscilloscopeStore, type OscRun, type OscSample } from './useOscilloscopeStore';
 import { RaspberryPi3Bridge } from '../simulation/RaspberryPi3Bridge';
 import { PiBridgeShim } from '../simulation/PiBridgeShim';
@@ -1877,6 +1878,9 @@ interface SimulatorState {
     components: Component[];
     wires: Wire[];
     activeBoardId: string | null;
+    /** The project's World. Omitted: the World is left as it is (a caller
+     *  that is not loading a whole project); null: an empty World. */
+    world?: import('../world/useWorldStore').WorldData | null;
   }) => void;
   updateBoard: (boardId: string, updates: Partial<BoardInstance>) => void;
   /** Turn a board 90 degrees clockwise and re-stamp its wire endpoints. A
@@ -3967,6 +3971,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       // The scope's channels name nets and pins of the circuit going away; in
       // the one coming in, "n0" is another point (velxio/velxio-prod#119).
       useOscilloscopeStore.getState().resetChannels();
+      if (payload.world !== undefined) useWorldStore.getState().load(payload.world);
 
       // Recreate boards with their saved ids so wire endpoints (which embed
       // the literal board id) keep matching.

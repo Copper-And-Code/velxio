@@ -79,6 +79,7 @@ export function restoreStashedWorkspace(): boolean {
       components: payload.components,
       wires: payload.wires,
       activeBoardId: payload.activeBoardId,
+      world: payload.world ?? null,
     });
     return true;
   } catch {

@@ -549,6 +549,26 @@
       "revision": "Real board revision",
       "saveToDrive": "Copy to the board's drive",
       "savedToDrive": "Copied {{file}} onto {{drive}}. The board reboots into your sketch."
+    },
+    "world": {
+      "title": "World",
+      "scene": "Scene",
+      "run": "Run",
+      "runTitle": "Reload the World with the HTML as it is now",
+      "toggleTitle": "World: the circuit in a 3D or 2D scene (world.html)",
+      "editStarter": "Edit the starter",
+      "editStarterTitle": "Copy the starter World into the project to change it",
+      "starterNote": "This is the starter World. Edit it and it becomes the project's world.html; Run reloads the scene.",
+      "files": "Files",
+      "noFiles": "No files yet.",
+      "addFile": "Add files…",
+      "removeFile": "Remove",
+      "filesHint": "Models (.glb), textures and sounds the page loads with await velxio.asset('name'). They are saved with the project.",
+      "fileTooBig": "{{name}} is larger than 24 MB and was not added",
+      "log": "Log",
+      "logTitle": "console.* and errors of the World page",
+      "emptyLog": "Nothing logged yet.",
+      "close": "Close the World"
     }
   },
   "about": {
