@@ -12,6 +12,22 @@ complete corresponding source for the binaries we distribute is
 available to anyone who receives those binaries, with no additional
 conditions attached — see [Getting the source](#1-getting-the-source).
 
+## In the Copper and Code fork
+
+This fork does not use Velxio's prebuilts: its QEMU binaries are built
+from two public trees, and the source of every binary in `prebuilt/qemu`
+is the branch named here.
+
+| Binary | Source | Branch | Build |
+|---|---|---|---|
+| `libqemu-xtensa.so`, `libqemu-riscv32.so` (ESP32, ESP32-C3, and ESP32-S3 with the `esp32s3-picsimlab` machine, its display and its WiFi) | [Copper-And-Code/qemu-picsimlab](https://github.com/Copper-And-Code/qemu-picsimlab), fork of `lcgamboa/qemu` | `velxio-s3` | `./build_libqemu-esp32.sh`; after a change, `./relink_libqemu.sh` |
+| `qemu-system-arm` (RP2350, the `raspi-pico2` machine) | [Copper-And-Code/qemu-rp2040-pico](https://github.com/Copper-And-Code/qemu-rp2040-pico), fork of `2xs/qemu-rp2040-pico` | `rp2350` | `mkdir build && cd build && ../configure --target-list=arm-softmmu --disable-docs && ninja qemu-system-arm` |
+
+Copy the results into `prebuilt/qemu/` (the ESP32 ROM blobs come from
+the same tree, `pc-bios/`). The firmwares of the panel boards are built
+from [copper-and-code-mcu-boards](https://github.com/Copper-And-Code/copper-and-code-mcu-boards),
+the `VELXIO` variant of each board.
+
 ## Read this first: upstream will not build what Velxio runs
 
 Velxio's ESP32 support does **not** come from an unmodified upstream
