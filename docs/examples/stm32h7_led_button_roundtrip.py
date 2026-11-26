@@ -21,14 +21,10 @@ Run with:
 
 import time
 
-# `partial` is more stable for complex LVGL demos in Renode, but this
-# roundtrip example prioritizes click-to-widget latency over animation
-# stability, so use a single DIRECT framebuffer.
-LTDC_RENDER_MODE = "direct_single"
-
+# display_driver starts the panel, LVGL, the touch (the Velxio canvas) and a
+# background lv.timer_handler(): the loop at the end only watches the button.
 import display_driver
 import lvgl as lv
-import stm
 from machine import Pin
 
 
@@ -53,41 +49,6 @@ except AttributeError:
     # Some MicroPython STM32 builds omit pull constants. The Velxio pushbutton
     # still drives the pin explicitly through Renode, so a plain input works.
     button = Pin(BUTTON_PIN, Pin.IN)
-
-
-# ── Display ───────────────────────────────────────────────────────────────
-disp_drv = lv.display_get_default()
-
-
-# ── Touch mailbox layout ─────────────────────────────────────────────────
-# Must match RenodeManager.TOUCH_MAILBOX in the backend.
-
-TOUCH = 0xC1F00000
-TOUCH_PR = TOUCH + 0x00
-TOUCH_X = TOUCH + 0x04
-TOUCH_Y = TOUCH + 0x08
-
-stm.mem32[TOUCH_PR] = 0
-stm.mem32[TOUCH_X] = 0
-stm.mem32[TOUCH_Y] = 0
-
-
-def read_velxio_touch(indev, data):
-    pressed = stm.mem32[TOUCH_PR] & 0x1
-    x = stm.mem32[TOUCH_X]
-    y = stm.mem32[TOUCH_Y]
-    if x > 1023:
-        x = 1023
-    if y > 599:
-        y = 599
-    data.point.x = x
-    data.point.y = y
-    data.state = lv.INDEV_STATE.PRESSED if pressed else lv.INDEV_STATE.RELEASED
-
-
-indev = lv.indev_create()
-indev.set_type(lv.INDEV_TYPE.POINTER)
-indev.set_read_cb(read_velxio_touch)
 
 
 # ── UI ───────────────────────────────────────────────────────────────────
@@ -146,12 +107,7 @@ led_state = [0]
 button_presses = [0]
 
 
-def refresh_now():
-    lv.timer_handler()
-    lv.refr_now(disp_drv)
-
-
-def set_led_state(value, refresh=True):
+def set_led_state(value):
     next_state = 1 if value else 0
     if led_state[0] == next_state:
         led.value(next_state)
@@ -161,8 +117,6 @@ def set_led_state(value, refresh=True):
     led.value(next_state)
     led_btn_label.set_text("LVGL LED: " + ("ON" if next_state else "OFF"))
     led_btn.set_style_bg_color(lv.color_hex(0xE76F51 if next_state else 0x2A9D8F), 0)
-    if refresh:
-        refresh_now()
 
 
 def on_led_button(event):
@@ -195,19 +149,10 @@ def handle_external_button():
     status.set_text("External button PA0: pressed")
     counter_label.set_text("External presses: " + str(button_presses[0]))
     bar.set_value(button_presses[0] % 21, ANIM_OFF)
-    refresh_now()
 
 
-# ── Initial render ────────────────────────────────────────────────────────
-
-lv.tick_inc(20)
-refresh_now()
-
-
-# ── Main loop ─────────────────────────────────────────────────────────────
+# ── Main loop: LVGL runs in the background (display_driver) ───────────────
 
 while True:
     handle_external_button()
-    lv.tick_inc(15)
-    lv.timer_handler()
     time.sleep_ms(15)

@@ -1,55 +1,12 @@
-import usys as sys
-
-sys.path.append("")  # See: https://github.com/micropython/micropython/issues/6419
-
-# STM32H7 LTDC render mode. This complex RGB888 demo is most reliable with
-# double-buffer DIRECT. `direct_single` can reduce latency on small demos, but
-# it causes visible tearing here; PARTIAL currently needs more driver work for
-# RGB888 before it is safe on this screen.
-LTDC_RENDER_MODE = "direct"
-
-# See: https://pymotw.com/2/sys/tracing.html
-
-# ── Custom LVGL indev driver — reads the Velxio touch mailbox ────────────
-# ── Touch mailbox layout ─────────────────────────────────────────────────
-# Must match RenodeManager.TOUCH_MAILBOX in the backend.
-import stm
-TOUCH    = 0xC1F00000
-TOUCH_PR = TOUCH + 0x00     # uint32: pressed flag (0 or 1)
-TOUCH_X  = TOUCH + 0x04     # uint32: x in display pixels (0..1023)
-TOUCH_Y  = TOUCH + 0x08     # uint32: y in display pixels (0..599)
-
-# Zero the mailbox at startup so the first read isn't garbage from SDRAM.
-stm.mem32[TOUCH_PR] = 0
-stm.mem32[TOUCH_X]  = 0
-stm.mem32[TOUCH_Y]  = 0
-def read_velxio_touch(indev, data):
-    pressed = stm.mem32[TOUCH_PR] & 0x1
-    x = stm.mem32[TOUCH_X]
-    y = stm.mem32[TOUCH_Y]
-    if x > 1023: x = 1023
-    if y > 599:  y = 599
-    data.point.x = x
-    data.point.y = y
-    data.state = lv.INDEV_STATE.PRESSED if pressed else lv.INDEV_STATE.RELEASED
-
-def mp_trace(frame, event, arg):
-    co = frame.f_code
-    func_name = co.co_name
-    func_line_no = frame.f_lineno
-    func_filename = co.co_filename
-    print("[%s] [%s] %s:%s" % (event, func_name, func_filename, func_line_no))
-    return mp_trace
-
-
-# sys.settrace(mp_trace)
+# LVGL advanced demo for the STM32H7_CORE in Velxio (Renode).
+#
+# `import display_driver` is all the setup: it starts the 1024x600 LTDC panel,
+# LVGL on its two framebuffers, the touch (the Velxio canvas, through a mailbox)
+# and a background lv.timer_handler(), so this program has no main loop.
+# Firmware: the STM32H7_CORE VELXIO variant of copper-and-code-mcu-boards.
 
 import lvgl as lv
-from lv_utils import event_loop
-
-# lvgl must be initialized before any lvgl function is called or object/struct is constructed!
-
-lv.init()
+import display_driver
 
 ##############################################################################
 # Styles
@@ -387,175 +344,14 @@ class Screen_Main(lv.obj):
 
 
 class AdvancedDemoApplication:
-    def init_gui_SDL(self):
-        WIDTH = 480
-        HEIGHT = 320
-        ZOOM = 1
-        FULLSCREEN = False
-
-        self.event_loop = event_loop()
-        self.disp_drv = lv.sdl_window_create(WIDTH, HEIGHT)
-        self.mouse = lv.sdl_mouse_create()
-        self.keyboard = lv.sdl_keyboard_create()
-        self.keyboard.set_group(self.group)
-
-    def init_gui_esp32(self):
-        # Initialize ILI9341 display
-
-        from ili9XXX import ili9341
-
-        # self.disp = ili9341(dc=32, cs=33, power=-1, backlight=-1)
-        self.disp = ili9341(
-            mhz=20, dc=32, cs=33, power=-1, backlight=-1, hybrid=False, factor=8
-        )
-
-        # Register raw resistive touch driver
-
-        """
-        import rtch
-        self.touch = rtch.touch(xp = 32, yp = 33, xm = 25, ym = 26, touch_rail = 27, touch_sense = 33)
-        self.touch.init()
-        self.indev_drv = lv.indev_create()
-        self.indev_drv.set_type(lv.INDEV_TYPE.POINTER)
-        self.indev_drv.set_read_cb(self.touch.read)
-        """
-
-        # Register xpt2046 touch driver
-
-        from xpt2046 import xpt2046
-
-        self.touch = xpt2046()
-
-    def init_gui_stm32(self):
-        import rk043fn48h as lcd
-
-        hres = 480
-        vres = 272
-        color_format = lv.COLOR_FORMAT.ARGB8888
-
-        # Register display driver
-        self.event_loop = event_loop()
-        lcd.init(w=hres, h=vres)
-
-        draw_buf1 = lv.draw_buf_create(hres, 50, color_format, 0)
-        draw_buf2 = lv.draw_buf_create(hres, 50, color_format, 0)
-
-        self.disp_drv = lv.display_create(hres, vres)
-        self.disp_drv.set_flush_cb(lcd.flush)
-        self.disp_drv.set_color_format(color_format)
-        self.disp_drv.set_draw_buffers(draw_buf1, draw_buf2)
-        self.disp_drv.set_render_mode(lv.DISPLAY_RENDER_MODE.PARTIAL)
-
-        # Register touch sensor
-        self.indev_drv = lv.indev_create()
-        self.indev_drv.set_type(lv.INDEV_TYPE.POINTER)
-        self.indev_drv.set_read_cb(lcd.ts_read)
-
-    def init_gui_stm32h7(self):
-        from machine import I2C, SoftI2C, Pin
-        from display_conf import board, panel
-        import st_ltdc
-        #import touch_i2c
-        import lv_utils
-
-        render_mode = globals().get("LTDC_RENDER_MODE", "direct")
-
-        if lv.is_initialized():
-            lv.deinit()
-        lv.init()
-        event_loop = lv_utils.event_loop(
-            asynchronous=False,
-            exception_sink=None
-        )
-        # --- Display ---
-        params = {
-            "width":   panel.WIDTH,
-            "height":  panel.HEIGHT,
-            "hsync":   panel.HSYNC, "hbp": panel.HBP, "hfp": panel.HFP,
-            "vsync":   panel.VSYNC, "vbp": panel.VBP, "vfp": panel.VFP,
-            "fb_addr": getattr(board, 'FB_ADDR', 0xC0000000),
-            "bl":      Pin(board.BL_PIN, Pin.OUT),
-            "polarity": panel.POLARITY,
-        }
-
-        if hasattr(board, 'RST_PIN') and board.RST_PIN != "":
-            params["rst"] = Pin(board.RST_PIN, Pin.OUT)
-
-        disp = st_ltdc.LTDC(**params)
-        disp_drv = lv.display_create(panel.WIDTH, panel.HEIGHT)
-        disp_drv.set_color_format(lv.COLOR_FORMAT.RGB888)
-        disp.init(disp_drv)
-        if render_mode == "direct_single":
-            buf1 = disp.framebuffer(1)
-            disp_drv.set_buffers(buf1, None, len(buf1), lv.DISPLAY_RENDER_MODE.DIRECT)
-        else:
-            buf1 = disp.framebuffer(1)
-            buf2 = disp.framebuffer(2)
-            disp_drv.set_buffers(buf1, buf2, len(buf1), lv.DISPLAY_RENDER_MODE.DIRECT)
-
-        disp_drv.set_flush_cb(disp.flush)
-
-        # --- Touch ---
-        indev = lv.indev_create()
-        indev.set_type(lv.INDEV_TYPE.POINTER)
-        indev.set_read_cb(read_velxio_touch)
-
-    def init_gui_rp2(self):
-        import xpt2046
-        import st77xx
-
-        if sys.platform != "rp2":
-            raise ImportError("Only works on the rp2 platform.")
-        print("Using RP2 GUI")
-        spi = machine.SPI(
-            1,
-            baudrate=24_000_000,
-            polarity=0,
-            phase=0,
-            sck=machine.Pin(10, machine.Pin.OUT),
-            mosi=machine.Pin(11, machine.Pin.OUT),
-            miso=machine.Pin(12, machine.Pin.IN),
-        )
-        self.disp = st77xx.St7789(
-            rot=st77xx.ST77XX_INV_LANDSCAPE,
-            res=(240, 320),
-            spi=spi,
-            cs=9,
-            dc=8,
-            bl=13,
-            rst=15,
-            rp2_dma=None,
-        )
-        self.disp.set_backlight(100)
-        self.touch = xpt2046.Xpt2046(spi=spi, cs=16, rot=xpt2046.XPT2046_INV_LANDSCAPE)
-
     def init_gui(self):
         self.group = lv.group_create()
         self.group.set_default()
 
-        # Identify platform and initialize it
-
-        if not event_loop.is_running():
-            if sys.platform == "rp2":
-                self.init_gui_rp2()
-            elif sys.platform == "esp32":
-                self.init_gui_esp32()
-            elif sys.platform == "linux":
-                self.init_gui_SDL()
-            elif sys.platform == "stm32":
-                self.init_gui_stm32()
-            elif sys.platform == "pyboard":
-                self.init_gui_stm32h7()
-
         # Create the main screen and load it.
-
         self.screen_main = Screen_Main(self)
         lv.screen_load(self.screen_main)
 
 
 app = AdvancedDemoApplication()
 app.init_gui()
-
-# if __name__ == '__main__':
-#    while True:
-#        pass

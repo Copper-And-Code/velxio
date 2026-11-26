@@ -15,7 +15,7 @@ export type BoardKind =
   | 'esp32-c3' // RISC-V RV32IMC, QEMU backend
   | 'xiao-esp32-c3' // Seeed XIAO ESP32-C3, QEMU backend
   | 'aitewinrobot-esp32c3-supermini' // ESP32-C3 SuperMini, QEMU backend
-  | 'stm32-h7-core-v13' // STM32H743 Core (Aliexpress) V13, lv_micropython, Renode backend
+  | 'stm32-h7-core-v13' // STM32H743 Core (Aliexpress) V13, MicroPython + LVGL (copper-and-code-mcu-boards), Renode backend
   | 'attiny85'; // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython';
@@ -36,7 +36,7 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'esp32-c3',
   'xiao-esp32-c3',
   'aitewinrobot-esp32c3-supermini',
-  // STM32H7 (Renode bridge) — lv_micropython firmware
+  // STM32H7 (Renode bridge) — MicroPython + LVGL firmware, VELXIO variant
   'stm32-h7-core-v13',
 ]);
 

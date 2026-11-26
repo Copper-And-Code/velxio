@@ -17,6 +17,7 @@ import logging
 import os
 import pty
 import re
+import signal
 import socket
 import struct
 import subprocess
@@ -36,9 +37,12 @@ _REPO_ROOT   = os.environ.get(
 RENODE_BIN   = os.environ.get('RENODE_BIN', 'renode')
 REPL_PATH    = os.path.join(_REPO_ROOT, 'renode', 'platforms', 'stm32h7_core_v13.repl')
 FB_SERVER_PY = os.path.join(_REPO_ROOT, 'renode', 'extensions', 'velxio_framebuffer_server.py')
+# Firmware: the STM32H7_CORE VELXIO variant of Copper-And-Code/copper-and-code-mcu-boards
+# (`scripts/build.sh stm32 STM32H7_CORE VELXIO`), copied to prebuilt/stm32h7/ as
+# the Docker image expects it; STM32H7_CORE_FIRMWARE overrides the path.
 DEFAULT_FW   = os.environ.get(
     'STM32H7_CORE_FIRMWARE',
-    '/opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf',
+    os.path.join(_REPO_ROOT, 'prebuilt', 'stm32h7', 'firmware.elf'),
 )
 
 
@@ -52,20 +56,13 @@ EventCallback = Callable[[str, dict], Awaitable[None]]
 
 
 # ── Touch input mailbox (Velxio extension) ───────────────────────────────────
-# A 16-byte region high up in SDRAM (31 MB into the 32 MB chip — well past
-# the LVGL framebuffer pool which grows from 0xC0000000). The backend writes
-# touch coordinates here via the Renode monitor; a custom LVGL indev driver
-# in MicroPython polls it via `stm.mem32[]`.
-#
-# Why SDRAM and not sramBank1 (FMC NOR/PSRAM at 0x60000000)? The lv_micropython
-# H7 build only initialises the FMC SDRAM controller (the SDRAM chip), not the
-# external bus banks at 0x60000000-0x9FFFFFFF — so `stm.mem32[0x60000000]`
-# from MicroPython hits an unconfigured FMC region and either silently
-# returns 0 or hardfaults the firmware. The Renode monitor talks to the
-# sysbus directly and bypasses that, so backend writes "work" but the MP
-# read side breaks. SDRAM has no such issue: the firmware needs it for the
-# framebuffer anyway, so it's fully configured by the time user code runs.
-TOUCH_MAILBOX = 0xC1F00000
+# Renode models no GT911, so the backend writes the pointer into a 16-byte
+# mailbox at the top of the D3 SRAM (SRAM4, 0x38000000-0x3800FFFF), which the
+# firmware uses for nothing else. The VELXIO firmware variant reads it in
+# python/velxio_touch.py and display_driver registers it as the LVGL pointer, so
+# applications need no code of their own. Not in the SDRAM: its top 4 MB
+# (0xC1C00000-0xC1FFFFFF) are st_ltdc's framebuffer zone, below it is the GC heap.
+TOUCH_MAILBOX = 0x3800FF00
 #   +0x00 (uint32) pressed (0/1)
 #   +0x04 (uint32) x (display pixel)
 #   +0x08 (uint32) y (display pixel)
@@ -360,10 +357,9 @@ class RenodeManager:
                            x: int, y: int, pressed: bool) -> None:
         """Write (x, y, pressed) into the touch mailbox at TOUCH_MAILBOX.
 
-        A custom LVGL indev driver in the user's MicroPython program polls
-        these four uint32 words via `stm.mem32[]`; we keep the protocol as
-        simple as possible — no interrupts, no handshaking — so the demo
-        code stays a few lines.
+        The firmware's touch driver (velxio_touch.py, registered by
+        display_driver) polls these four uint32 words from LVGL's indev read
+        callback; no interrupts, no handshaking.
 
         Skips redundant writes (same x, y, pressed as previous call) to
         avoid spamming the monitor under fast mouse-move bursts. Each
@@ -385,7 +381,7 @@ class RenodeManager:
         # GPIO/register polling; if it is unavailable we fall back to the
         # Renode monitor command.
         #
-        # Order matters: the LVGL indev callback in the user's MP demo
+        # Order matters: the LVGL indev callback in the firmware
         # reads the mailbox non-atomically, so it can observe writes mid-
         # flight. We deliberately put `pressed` LAST — that way the
         # firmware sees `pressed=1` only after `x` and `y` are already at
@@ -465,6 +461,9 @@ class RenodeManager:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
+                    # `renode` is a shell script that starts `dotnet Renode.dll`:
+                    # a group of its own, so that _shutdown stops both.
+                    start_new_session=True,
                 ),
             )
         except FileNotFoundError:
@@ -1348,6 +1347,18 @@ class RenodeManager:
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _signal_group(process: subprocess.Popen, sig: int) -> None:
+        try:
+            os.killpg(process.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+        except OSError:
+            try:
+                process.send_signal(sig)
+            except Exception:
+                pass
+
     async def _shutdown(self, inst: RenodeInstance) -> None:
         inst.running = False
 
@@ -1422,17 +1433,18 @@ class RenodeManager:
 
         if inst.process:
             loop = asyncio.get_running_loop()
+            # The whole process group: terminating only the `renode` script
+            # left `dotnet Renode.dll` running, with our stdout pipe open.
             try:
-                inst.process.terminate()
+                self._signal_group(inst.process, signal.SIGTERM)
                 await asyncio.wait_for(
                     loop.run_in_executor(None, inst.process.wait),
                     timeout=5.0,
                 )
             except Exception:
-                try:
-                    inst.process.kill()
-                except Exception:
-                    pass
+                self._signal_group(inst.process, signal.SIGKILL)
+            # The Renode script can exit before dotnet: make sure no one is left.
+            self._signal_group(inst.process, signal.SIGKILL)
             inst.process = None
 
         if inst.resc_path and os.path.exists(inst.resc_path):

@@ -2,9 +2,10 @@
 Velxio STM32H7 + LVGL touch demo (runnable).
 
 Builds a tiny LVGL UI (centered button + slider) on the 1024x600 LTDC
-display, and wires the browser canvas mouse events to LVGL via the
-Velxio touch mailbox at 0xC1F00000 (see docs/STM32H7_MANUAL_TEST.md
-section 8 for the full architecture).
+display. The browser canvas is the touch screen: `import display_driver`
+registers it as the LVGL pointer (velxio_touch.py in the firmware reads the
+mailbox the backend writes, see docs/STM32H7_MANUAL_TEST.md section 8), and
+serves LVGL in the background, so the program has no main loop.
 
 Usage:
   1. Start the Velxio backend + frontend.
@@ -14,34 +15,10 @@ Usage:
            run docs/examples/stm32h7_touch_demo.py
   4. Click on the display in the browser canvas.
 
-The lv_micropython firmware needs the patches under
-user_modules/lv_binding_micropython/driver/stm32/st_ltdc/ to recognise
-VERSION="VELXIO" and skip the GT911 touch init in Renode.
+Firmware: the STM32H7_CORE VELXIO variant of copper-and-code-mcu-boards.
 """
 import lvgl as lv
-
-# Touch interactions benefit from lower latency more than from animation
-# stability, so ask display_driver for a single DIRECT framebuffer.
-LTDC_RENDER_MODE = "direct_single"
-
 import display_driver
-import stm
-import time
-
-# ── Display ───────────────────────────────────────────────────────────────
-disp_drv = lv.display_get_default()
-
-# ── Touch mailbox layout ─────────────────────────────────────────────────
-# Must match RenodeManager.TOUCH_MAILBOX in the backend.
-TOUCH    = 0xC1F00000
-TOUCH_PR = TOUCH + 0x00     # uint32: pressed flag (0 or 1)
-TOUCH_X  = TOUCH + 0x04     # uint32: x in display pixels (0..1023)
-TOUCH_Y  = TOUCH + 0x08     # uint32: y in display pixels (0..599)
-
-# Zero the mailbox at startup so the first read isn't garbage from SDRAM.
-stm.mem32[TOUCH_PR] = 0
-stm.mem32[TOUCH_X]  = 0
-stm.mem32[TOUCH_Y]  = 0
 
 # ── UI ───────────────────────────────────────────────────────────────────
 scr = lv.screen_active()
@@ -75,7 +52,6 @@ clicks = [0]
 def on_btn_clicked(e):
     clicks[0] += 1
     counter_lbl.set_text('Clicks: ' + str(clicks[0]))
-    lv.refr_now(disp_drv)
 btn.add_event_cb(on_btn_clicked, lv.EVENT.CLICKED, None)
 
 sld = lv.slider(scr)
@@ -91,35 +67,4 @@ sld_lbl.align(lv.ALIGN.BOTTOM_MID, 0, -50)
 
 def on_sld_changed(e):
     sld_lbl.set_text('Slider: ' + str(sld.get_value()))
-    lv.refr_now(disp_drv)
 sld.add_event_cb(on_sld_changed, lv.EVENT.VALUE_CHANGED, None)
-
-# ── Custom LVGL indev driver — reads the Velxio touch mailbox ────────────
-def read_velxio_touch(indev, data):
-    pressed = stm.mem32[TOUCH_PR] & 0x1
-    x = stm.mem32[TOUCH_X]
-    y = stm.mem32[TOUCH_Y]
-    if x > 1023: x = 1023
-    if y > 599:  y = 599
-    data.point.x = x
-    data.point.y = y
-    data.state = lv.INDEV_STATE.PRESSED if pressed else lv.INDEV_STATE.RELEASED
-
-indev = lv.indev_create()
-indev.set_type(lv.INDEV_TYPE.POINTER)
-indev.set_read_cb(read_velxio_touch)
-
-# ── Initial render — populate the buffer so something is visible while
-# the user is still moving the cursor towards the canvas.
-for _ in range(60):
-    scr.invalidate()
-    lv.tick_inc(20)
-    lv.timer_handler()
-    lv.refr_now(disp_drv)
-
-# ── Idle loop — pump LVGL so the indev callback fires and widgets stay
-# responsive even if lv_utils.event_loop drifts on Renode.
-while True:
-    lv.tick_inc(15)
-    lv.timer_handler()
-    time.sleep_ms(15)

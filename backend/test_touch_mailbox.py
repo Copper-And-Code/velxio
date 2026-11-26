@@ -4,7 +4,7 @@ Smoke test for the touch input path:
   RenodeManager._read_register ← monitor ReadDoubleWord    ← SDRAM @ TOUCH_MAILBOX
 
 This exercises the backend half of the architecture documented in
-docs/STM32H7_MANUAL_TEST.md section 8 (touch mailbox at 0xC1F00000)
+docs/STM32H7_MANUAL_TEST.md section 8 (touch mailbox at 0x3800FF00)
 without spinning up MicroPython on top — useful for catching regressions
 in `inject_touch` (write order, dedup, seqno bump) without the full LVGL
 stack. For an end-to-end test that exercises the LVGL indev callback

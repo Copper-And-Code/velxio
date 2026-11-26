@@ -133,9 +133,10 @@ WORKDIR /app
 # Data directory for persistent SQLite database (mounted as a volume at runtime)
 RUN mkdir -p /app/data
 
-# ── STM32H7 emulation: Renode + lv_micropython firmware ─────────────────────
-# The backend runs Renode headless and loads a prebuilt lv_micropython ELF.
-# Put the locally built firmware at prebuilt/stm32h7/firmware.elf before
+# ── STM32H7 emulation: Renode + MicroPython/LVGL firmware ───────────────────
+# The backend runs Renode headless and loads a prebuilt ELF: the STM32H7_CORE
+# VELXIO variant of Copper-And-Code/copper-and-code-mcu-boards
+# (scripts/build.sh stm32 STM32H7_CORE VELXIO). Put it at prebuilt/stm32h7/firmware.elf before
 # building the image. Keeping firmware prebuilt avoids making Docker rebuild
 # the full STM32/lvgl toolchain on every image build.
 ARG RENODE_PORTABLE_URL=https://builds.renode.io/renode-latest.linux-portable.tar.gz
@@ -149,7 +150,7 @@ RUN mkdir -p /opt/renode \
 RUN mkdir -p /app/lib/stm32h7
 COPY prebuilt/stm32h7/ /app/lib/stm32h7/
 RUN test -f /app/lib/stm32h7/firmware.elf \
-    || (echo "Missing STM32H7 firmware: copy lv_micropython firmware.elf to prebuilt/stm32h7/firmware.elf before docker build" >&2; exit 1)
+    || (echo "Missing STM32H7 firmware: build the STM32H7_CORE VELXIO firmware (copper-and-code-mcu-boards) and copy its firmware.elf to prebuilt/stm32h7/firmware.elf before docker build" >&2; exit 1)
 
 # Install Python backend dependencies
 COPY backend/requirements.txt .

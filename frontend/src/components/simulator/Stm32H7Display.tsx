@@ -295,7 +295,7 @@ export const Stm32H7Display = ({ id, x, y }: Stm32H7DisplayProps) => {
           // Enable pointer events on the screen alone — the parent has
           // pointerEvents: 'none' so the rest of the PCB silkscreen
           // doesn't intercept canvas drags. Touch is forwarded to the
-          // backend's mailbox at 0xC1F00000 (see Stm32H7Bridge.sendTouch).
+          // backend's mailbox at 0x3800FF00 (see Stm32H7Bridge.sendTouch).
           pointerEvents: 'auto',
           cursor: 'crosshair',
         }}

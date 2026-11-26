@@ -706,7 +706,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         serialBaudRate: 0,
         serialMonitorOpen: false,
         activeFileGroupId: `group-${id}`,
-        // STM32H7_CORE only runs lv_micropython — there is no Arduino toolchain
+        // STM32H7_CORE only runs MicroPython + LVGL — there is no Arduino toolchain
         // for it, so default to MicroPython mode so the SerialMonitor exposes
         // the REPL badge + Ctrl+C/D shortcuts and the editor opens main.py.
         languageMode: boardKind === 'stm32-h7-core-v13' ? 'micropython' : 'arduino',
@@ -892,7 +892,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         }
       } else if (board.boardKind === 'stm32-h7-core-v13') {
         // STM32H7 path: firmware is already baked into the Renode boot script
-        // (lv_micropython ELF), so we only need to queue the user code for
+        // (MicroPython + LVGL ELF), so we only need to queue the user code for
         // raw-paste REPL injection. The bridge's state machine fires once
         // the boot banner is seen — this works whether the bridge is already
         // connected (just rearm) or about to connect (queued for first boot).

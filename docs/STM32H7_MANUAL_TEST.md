@@ -35,23 +35,20 @@ npm install
 ```
 
 ### 1.4 Firmware MicroPython per STM32H7_CORE
-Il path del firmware è hard-coded nel template `.resc` generato da
-`renode_manager.py`:
+Il firmware è la variante **VELXIO** di STM32H7_CORE in
+[copper-and-code-mcu-boards](https://github.com/Copper-And-Code/copper-and-code-mcu-boards):
+la V1.3 senza USB e SD (Renode non le modella), con il touch letto dal mailbox
+di Velxio (`python/velxio_touch.py`, sezione 8).
 ```bash
-ls /opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf
+# in copper-and-code-mcu-boards
+scripts/build.sh stm32 STM32H7_CORE VELXIO
+# in velxio: il backend lo cerca qui (override: STM32H7_CORE_FIRMWARE)
+cp <copper-and-code-mcu-boards>/.work/micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf \
+   prebuilt/stm32h7/firmware.elf
 ```
-Per il **path LVGL touch** (sezione 8) servono tre patch nel repo
-`lv_micropython` (sotto `user_modules/lv_binding_micropython/driver/stm32/st_ltdc/`):
-
-- `boards.py` → aggiungere classe `STM32H743_CORE_VELXIO` (clone di V13 con
-  tutti i `TP_*_PIN = ""` per saltare il GT911 in Renode)
-- `display_conf.py` → branch `elif VERSION == "VELXIO": from boards import STM32H743_CORE_VELXIO as board`
-- `st_ltdc_utils.py` → wrappare il blocco touch in `if getattr(board, 'TP_INT_PIN', '') != '':`
-
-Poi rebuild:
+Test end-to-end senza browser (boot, REPL, LVGL, touch, framebuffer):
 ```bash
-cd /opt/github/lv_micropython/ports/stm32
-make BOARD=STM32H7_CORE BOARD_VARIANT=VELXIO -j$(nproc)
+cd backend && python test_stm32_velxio_e2e.py --png /tmp/frame.png
 ```
 
 ---
@@ -70,7 +67,7 @@ python3 -u test_stm32_framebuffer.py
 1. Avvia `RenodeManager.start_instance` per la board `stm32-h7-core-v13`.
 2. Aspetta il prompt `>>>` di MicroPython sulla USART1 virtuale (≤60 s).
 3. Invia in **raw paste mode** (Ctrl-E … Ctrl-D) uno script che programma
-   un layer LTDC 32×8 RGB565 a `0xC0000000` con un gradient
+   un layer LTDC 32×8 RGB565 a `0xC1C00000` con un gradient
    (`v = (i * 73) & 0xffff`).
 4. Stampa un dump diagnostico dei registri LTDC via monitor.
 5. Aspetta fino a 30 s un evento `framebuffer` dal poller.
@@ -97,7 +94,7 @@ I primi 16 byte devono essere la sequenza `i*73 (mod 65536)` little-endian:
 | Sintomo                                       | Probabile causa                              |
 |-----------------------------------------------|----------------------------------------------|
 | `FAIL: no REPL prompt within 60s`             | Firmware non avvia: log Renode in stdout    |
-| Stampa registri ma `no framebuffer event`     | Il poller non trova il framebuffer — verifica `CFBAR == 0xC0000000` |
+| Stampa registri ma `no framebuffer event`     | Il poller non trova il framebuffer — verifica `CFBAR == 0xC1C00000` |
 | `EXC: ...`                                    | Bug Python lato backend                       |
 | Renode si pianta in boot                      | `pkill -9 -f Renode.dll`, riprova            |
 
@@ -134,7 +131,7 @@ Nel Serial Monitor, attiva paste-mode con Ctrl-E e incolla:
 ```python
 import stm
 stm.mem32[0x50001094] = 2                       # L1PFCR = RGB565
-stm.mem32[0x500010ac] = 0xC0000000              # L1CFBAR
+stm.mem32[0x500010ac] = 0xC1C00000              # L1CFBAR
 stm.mem32[0x500010b0] = (64 << 16) | 67         # L1CFBLR  pitch=64 line=64+3
 stm.mem32[0x500010b4] = 8                       # L1CFBLNR  height=8
 stm.mem32[0x50001084] = 1                       # L1CR.LEN = 1
@@ -142,8 +139,8 @@ stm.mem32[0x50001024] = 1                       # SRCR.IMR = 1 (commit shadow)
 stm.mem32[0x50001018] = 1                       # GCR.LTDCEN = 1
 for i in range(256):
     v = (i * 73) & 0xffff
-    stm.mem8[0xC0000000 + i*2]     = v & 0xff
-    stm.mem8[0xC0000000 + i*2 + 1] = (v >> 8) & 0xff
+    stm.mem8[0xC1C00000 + i*2]     = v & 0xff
+    stm.mem8[0xC1C00000 + i*2 + 1] = (v >> 8) & 0xff
 print("LTDC primed")
 ```
 
@@ -153,7 +150,7 @@ Premi Ctrl-D per eseguire.
 Sopra la board sul canvas, riquadro 32×8 con gradient blu/verde/viola.
 Pixel singoli visibili grazie a `image-rendering: pixelated`.
 
-### 3.7 Test "vero" con LVGL (richiede patch lv_micropython 1.4)
+### 3.7 Test "vero" con LVGL
 ```python
 import lvgl as lv
 import display_driver
@@ -162,10 +159,8 @@ scr.set_style_bg_color(lv.color_hex(0x404080), 0)
 scr.set_style_bg_opa(255, 0)
 btn = lv.button(scr); btn.set_size(200, 80); btn.center()
 lbl = lv.label(btn); lbl.set_text("Velxio + LVGL"); lbl.center()
-disp = lv.display_get_default()
-for _ in range(60):
-    scr.invalidate(); lv.tick_inc(20); lv.timer_handler(); lv.refr_now(disp)
 ```
+`display_driver` serve LVGL in background (timer), non serve un loop.
 
 ---
 
@@ -181,7 +176,7 @@ for _ in range(60):
 | `VELXIO_STM32_FB_BAND_ROWS`  | `16`        | Altezza delle bande full-res usate per diff/patch framebuffer |
 | `VELXIO_STM32_FB_BINARY`     | `1`         | Usa socket binario Renode per leggere SDRAM; `0` = solo monitor |
 | `RENODE_BIN`                 | `renode`    | Path al binario Renode                         |
-| `STM32H7_CORE_FIRMWARE`      | path locale lv_micropython | Path al firmware ELF STM32H7 |
+| `STM32H7_CORE_FIRMWARE`      | `prebuilt/stm32h7/firmware.elf` | Path al firmware ELF STM32H7 |
 | `VELXIO_REPO_ROOT`           | root repo rilevata dal backend | Root che contiene `renode/` |
 | `VELXIO_STM32_PTY`           | `1`         | Abilita symlink PTY per debug esterno (`0` in Docker) |
 | `VELXIO_RENODE_LOG`          | (off)       | Set per loggare anche stderr di Renode         |
@@ -240,12 +235,12 @@ rm -f /tmp/velxio_renode_*.resc
 
 ---
 
-## 8. Touch input — mailbox SDRAM
+## 8. Touch input — mailbox in SRAM4
 
 ### 8.1 Architettura
 
 Renode non emula il touch controller GT911. Il path scelto è una mailbox
-SDRAM condivisa fra backend e MicroPython:
+in SRAM4 condivisa fra backend e firmware:
 
 ```
 browser canvas mouse event
@@ -263,16 +258,16 @@ simulation.py route
 RenodeManager.inject_touch(client_id, x, y, pressed)
         │ 4× sysbus WriteDoubleWord (x, y, seq, pressed - in quest'ordine)
         ▼
-SDRAM @ 0xC1F00000
+SRAM4 @ 0x3800FF00
         │
         ▼
-read_velxio_touch (custom LVGL indev nel main.py utente)
-        │ stm.mem32[0xC1F00000+offset]
+velxio_touch.VelxioTouch.lv_read_cb (frozen nel firmware, registrato
+        │ da `import display_driver`), machine.mem32[0x3800FF00+offset]
         ▼
 LVGL processing → widget event
 ```
 
-### 8.2 Layout mailbox @ `0xC1F00000`
+### 8.2 Layout mailbox @ `0x3800FF00`
 
 | Offset  | Tipo    | Significato                              |
 |---------|---------|------------------------------------------|
@@ -281,14 +276,17 @@ LVGL processing → widget event
 | `+0x08` | uint32  | `y` in display pixel (0..599)            |
 | `+0x0C` | uint32  | `seqno` (incrementato per write distinta) |
 
-L'indirizzo è in **SDRAM** perché:
-- `sramBank1` (FMC `0x60000000`) richiede l'inizializzazione del controller
-  FMC bank 1 dal firmware, che lv_micropython non fa: `stm.mem32` da CPU
-  hardfaulta o legge garbage.
-- SDRAM (`0xC0000000`+) è inizializzata al boot per il framebuffer LVGL,
-  quindi è sempre accessibile dalla CPU.
-- `0xC1F00000` = 31 MB dentro la SDRAM da 32 MB → ben oltre il pool di
-  allocazione LVGL che cresce da `0xC0000000`.
+L'indirizzo è in cima alla **SRAM4** (D3, `0x38000000`-`0x3800FFFF`) perché:
+- il firmware non usa la SRAM4 (il linker conosce solo AXI SRAM, D2 SRAM e
+  SDRAM), quindi nessuno ci scrive sopra;
+- la SDRAM è tutta occupata: gli ultimi 4 MB (`0xC1C00000`-`0xC1FFFFFF`) sono
+  la zona framebuffer di `st_ltdc`, sotto c'è l'heap del GC. Il vecchio
+  mailbox a `0xC1F00000` cadeva dentro la zona framebuffer.
+- `sramBank1` (FMC `0x60000000`) richiederebbe il bank NOR/PSRAM del FMC,
+  che il firmware non configura.
+
+Le applicazioni non leggono il mailbox: `import display_driver` registra
+`VelxioTouch` come puntatore LVGL (`display_driver.touch`).
 
 ### 8.3 Ordine di scrittura nel backend
 
@@ -302,18 +300,14 @@ Inoltre il backend deduplica: se `(x, y, pressed)` è identico al last-seen
 per quell'istanza, salta la scrittura → niente flood del monitor durante
 hover/static.
 
-### 8.4 Single buffer mode (workaround visivo)
+### 8.4 Doppio framebuffer
 
-Il `display_driver` di lv_micropython configura LVGL in DIRECT mode con
-**due buffer alternati**. LTDC scansiona uno alla volta, mentre LVGL
-renderizza nell'altro. Sul real HW lo swap avviene su vsync; in Renode
-il poller backend legge il buffer attualmente puntato da CFBAR — che
-spesso è quello *non aggiornato*. Risultato: i widget appaiono al boot
-ma le modifiche post-evento non si vedono.
-
-Il demo bypassa il problema rifacendo `disp_drv.set_buffers(buf1, None, ...)`
-in single-buffer mode subito dopo `import display_driver`. LTDC e LVGL
-condividono lo stesso buffer → ogni cambio è immediatamente visibile.
+`display_driver` mette LVGL in DIRECT mode su **due framebuffer** nella zona
+di `st_ltdc` (`0xC1C00000` e `0xC1D2C000`, RGB565): LVGL disegna in quello
+nascosto e il flush lo mostra al vertical blanking scrivendo `L1CFBAR`. Il
+poller del backend rilegge `L1CFBAR` a ogni giro, quindi segue lo scambio e
+legge sempre il frame completo appena mostrato. Il workaround del vecchio
+firmware (`set_buffers(buf1, None, ...)` in single buffer) non serve più.
 
 ### 8.5 Limiti noti di throughput
 
@@ -405,20 +399,8 @@ mpremote connect /tmp/velxio-stm32-stm32-h7-core-v13.pty run docs/examples/stm32
 Click sul canvas browser → bottone incrementa contatore, slider segue
 il drag.
 
-Il driver LTDC Velxio supporta tre modalita' selezionabili dallo script
-MicroPython prima di `import display_driver`:
-
-```python
-LTDC_RENDER_MODE = "direct_single"  # latenza minore, un framebuffer DIRECT
-LTDC_RENDER_MODE = "partial"        # dirty-rect su schermate semplici RGB565
-LTDC_PARTIAL_LINES = 200            # altezza dei draw buffer in partial
-```
-
-La board usa `partial` come default firmware per il driver comune RGB565,
-mentre i demo touch/roundtrip forzano `direct_single` per privilegiare la
-reazione click → widget. `advanced_demo.py` ha invece un init LTDC proprio in
-RGB888 e resta su `direct` a doppio framebuffer: su quel demo `direct_single`
-mostra tearing, mentre il path `partial` RGB888 non e' ancora affidabile.
+Il demo non ha un loop LVGL: `display_driver` chiama `lv.timer_handler()`
+in background ogni 5 ms.
 
 ### 8.7 Demo GPIO + LVGL roundtrip
 

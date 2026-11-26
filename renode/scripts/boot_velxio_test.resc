@@ -1,7 +1,7 @@
 :name: STM32H7_CORE VELXIO boot test headless
 :description: Headless boot test of VELXIO variant firmware (no USB no SDCARD).
 
-$bin?=@/opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf
+$bin?=@/opt/github/velxio/prebuilt/stm32h7/firmware.elf
 $uartlog?=@/opt/github/velxio/renode/logs/uart_velxio.log
 
 using sysbus

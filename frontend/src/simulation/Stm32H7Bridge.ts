@@ -279,9 +279,9 @@ export class Stm32H7Bridge {
    * Inject a touch event into the LTDC display.
    *
    * The backend writes (x, y, pressed) into a 16-byte "touch mailbox" at
-   * `0xC1F00000` (near the top of SDRAM). A custom LVGL
-   * indev driver in the user's MicroPython demo polls that mailbox via
-   * `stm.mem32[]`. Coordinates are in display pixel space (0..1023, 0..599),
+   * `0x3800FF00` (top of the D3 SRAM). The firmware's touch driver
+   * (velxio_touch.py, registered by `import display_driver`) polls it from
+   * LVGL's indev read callback. Coordinates are in display pixel space (0..1023, 0..599),
    * so the caller is responsible for scaling from CSS / canvas-local
    * coordinates.
    *

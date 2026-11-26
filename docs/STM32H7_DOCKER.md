@@ -6,12 +6,17 @@ Velxio framebuffer/touch Renode extension.
 
 ## Required local artifact
 
-Build the patched `lv_micropython` firmware locally and copy the ELF into the
-Docker prebuilt directory:
+Build the STM32H7_CORE VELXIO variant of
+[copper-and-code-mcu-boards](https://github.com/Copper-And-Code/copper-and-code-mcu-boards)
+and copy the ELF into the Docker prebuilt directory (the backend uses the same
+path outside Docker, unless `STM32H7_CORE_FIRMWARE` names another):
 
 ```bash
+# in copper-and-code-mcu-boards
+scripts/build.sh stm32 STM32H7_CORE VELXIO
+# in velxio
 mkdir -p prebuilt/stm32h7
-cp /opt/github/lv_micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf \
+cp <copper-and-code-mcu-boards>/.work/micropython/ports/stm32/build-STM32H7_CORE-VELXIO/firmware.elf \
   prebuilt/stm32h7/firmware.elf
 ```
 
