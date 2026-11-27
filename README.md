@@ -35,6 +35,15 @@ An open-source multi-board emulator and circuit simulator. Write Arduino C++, Mi
 
 The screen on the canvas is the touch panel: click it. The ESP32-S3 machine and its WiFi, and the RP2350 machine, are this fork's own QEMU work (GPL-2.0, sources above).
 
+**What it does not show.** The `VELXIO` variant is the board's firmware with the parts the emulators do not have replaced, so an app that runs here can still fail on the board. Some of the replaced parts are where real boards have failed, such as the coloured specks of the ESP32-4848S040 panel:
+
+- **Screen.** On the ESP32-S3 and the RP2350 a virtual framebuffer device of the emulator stands for the panel and its driver (the ST7701 and the esp_lcd RGB panel; the PIO and DMA scan-out): panel timings, FIFO underruns and specks on the glass are not seen. On the STM32H743 the board's LTDC driver runs, but no panel is attached to it.
+- **Touch.** The ESP32-S3 reads the GT911 through the I2C controller instead of the board's bit-banged `SoftI2C`; the STM32H743 gets touches from a mailbox in RAM instead of the GT911. The RP2350 runs the board's own driver against an emulated GT911.
+- **Missing hardware.** The RP2350 machine has no double coprocessor (DCP) and no GPIO coprocessor: doubles in software, GPIO through the SIO. The STM32H743 has no USB and no SD card: the REPL is on the UART only.
+- **Speed.** The emulated CPUs do not run at the speed of the chips, nor do the memories: frame rates and timeouts are not those of the board.
+
+The firmware talks to the virtual devices at fixed addresses (`0x21000000` on the ESP32-S3, `0x5ffd0000` on the RP2350, the touch mailbox at `0x3800FF00` on the STM32H743): a change to a device model in the QEMU or Renode sources needs the same change in the `VELXIO` variant of [copper-and-code-mcu-boards](https://github.com/Copper-And-Code/copper-and-code-mcu-boards), and the other way round.
+
 **Examples.** The Copper and Code Studio apps for each board (`scripts/sync-studio-examples.py`), in the gallery next to Velxio's.
 
 **3D World.** The **3D** button of the canvas header shows the project's `world.html` over the circuit: a three.js (or 2D) page in a sandboxed iframe that sees the circuit only through `window.velxio`: LEDs, servos, buttons, sensors, the board screens as live textures you can touch, and `.glb` models added as World files. It follows the public `world/1` API of velxio.dev; see [docs/wiki/world.md](docs/wiki/world.md).
