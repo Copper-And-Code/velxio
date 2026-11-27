@@ -100,6 +100,10 @@ export class Stm32H7Bridge {
   // kept so existing chained-prevGpio code in Stm32H7Display still works,
   // but it now wraps `addGpioListener` under the hood.
   private _gpioListeners = new Set<(port: string, pin: number, value: boolean) => void>();
+  /** RP2350 lane: a pad's PWM duty, 0..1, or null when PWM stops driving it. */
+  onPwm: ((pin: number, duty: number | null) => void) | null = null;
+  /** RP2350 lane: a pad's direction, 1 driven by the firmware, 0 released. */
+  onGpioDir: ((pin: number, dir: 0 | 1) => void) | null = null;
   private _legacyOnGpio: ((port: string, pin: number, value: boolean) => void) | null = null;
 
   get onGpioChange():
@@ -250,9 +254,23 @@ export class Stm32H7Bridge {
           const port = String(msg.data.port ?? '');
           const pin  = Number(msg.data.pin) | 0;
           const val  = Boolean(msg.data.value);
-          if (port && pin >= 0 && pin < 16) {
+          // STM32H7: port A-H, pin 0-15. RP2350: no port, GP0-47 ('' port).
+          if ((port && pin >= 0 && pin < 16) || (!port && pin >= 0 && pin < 48)) {
             for (const cb of this._gpioListeners) cb(port, pin, val);
           }
+          break;
+        }
+        case `${this.prefix}gpio_dir`: {
+          // RP2350: 1 the firmware drives GPn, 0 it let it go (an input again).
+          const pin = Number(msg.data.pin) | 0;
+          if (pin >= 0 && pin < 48) this.onGpioDir?.(pin, Number(msg.data.dir) ? 1 : 0);
+          break;
+        }
+        case `${this.prefix}pwm`: {
+          // RP2350: the share of time a PWM channel drives GPn high (null: it stopped).
+          const pin = Number(msg.data.pin) | 0;
+          const duty = msg.data.duty === null || msg.data.duty === undefined ? null : Number(msg.data.duty);
+          if (pin >= 0 && pin < 48) this.onPwm?.(pin, duty);
           break;
         }
         case 'framebuffer': {
@@ -346,6 +364,12 @@ export class Stm32H7Bridge {
       type: `${this.prefix}gpio_input`,
       data: { port: p, pin, value },
     });
+  }
+
+  /** RP2350 lane: drive pad GPn from the circuit (null lets it go). */
+  setGpioInputPin(pin: number, value: boolean | null): void {
+    if (!Number.isInteger(pin) || pin < 0 || pin > 47) return;
+    this._send({ type: `${this.prefix}gpio_input`, data: { pin, value } });
   }
 
   private static _decodeBase64Bytes(b64: string): Uint8Array | null {

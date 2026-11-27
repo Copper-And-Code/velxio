@@ -104,6 +104,9 @@ function makeKit(velxio, send) {
       r.vl = 0; r.vr = 0; r.v = 0; r.w = 0; r.accel = 0;
       r.line = []; r.sonarCm = null; r.bumped = false;
       r.lastSonarT = -1; r.lastImuT = -1; r.sonarAngle = 0;
+      // line sensors this far apart across the front: inside a 2.2 cm tape by default,
+      // so a robot centred on it sees black with both
+      r.lineSpacing = clamp(num(o.lineSpacing, 0.016), 0.004, 0.08);
       r.displayId = r.bind.display ? String(r.bind.display) : null;
       r.displayTilt = clamp(num(o.displayTilt, 50), 0, 90);
     } else if (t === 'track') {
@@ -485,7 +488,7 @@ function makeKit(velxio, send) {
   function sense(rb) {
     var ids = asList(rb.bind.line), n = ids.length;
     if (n) {
-      var spacing = n === 2 ? 0.03 : 0.016;
+      var spacing = rb.lineSpacing;
       rb.line = ids.map(function (id, i) {
         var ly = ((n - 1) / 2 - i) * spacing;             // left to right across the front
         var p = toWorld(rb, rb.p.ahead, ly);
@@ -848,7 +851,7 @@ function makeKit(velxio, send) {
       g.strokeStyle = 'rgba(0,0,0,.6)'; g.stroke();
       // nose
       poly(o, [[p.L / 2 - 0.004, 0], [p.L / 2 - 0.03, 0.018], [p.L / 2 - 0.03, -0.018]]); g.fillStyle = 'rgba(255,255,255,.85)'; g.fill();
-      var ids = asList(o.bind.line), n = ids.length, spacing = n === 2 ? 0.03 : 0.016;
+      var ids = asList(o.bind.line), n = ids.length, spacing = o.lineSpacing;
       ids.forEach(function (id, i) {
         var w = toWorld(o, p.ahead, ((n - 1) / 2 - i) * spacing);
         g.beginPath(); g.arc(sx(w[0]), sy(w[1]), Math.max(2, 0.004 * k), 0, 2 * Math.PI);
@@ -1040,7 +1043,7 @@ function makeKit(velxio, send) {
         chassis.add(mount);
         grp.userData.screen = { tex: tex, sc: sc, version: -1 };
       }
-      var ids = asList(o.bind.line), n = ids.length, spacing = n === 2 ? 0.03 : 0.016;
+      var ids = asList(o.bind.line), n = ids.length, spacing = o.lineSpacing;
       grp.userData.leds = ids.map(function (id, i) {
         var led = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.004, 0.008), new THREE.MeshBasicMaterial({ color: 0x7cfc00 }));
         led.position.set(p.ahead, clear * 0.5, -((n - 1) / 2 - i) * spacing); chassis.add(led);
@@ -1093,7 +1096,13 @@ function makeKit(velxio, send) {
           led.material.color.set(o.line[i] !== undefined && o.line[i] < 0.5 ? 0xff3b30 : 0x7cfc00);
         });
         var su = m.userData.screen;
-        if (su && su.version !== su.sc.version) { su.tex.needsUpdate = true; su.version = su.sc.version; }
+        if (su && su.version !== su.sc.version) {
+          var cw = su.sc.canvas.width, chh = su.sc.canvas.height;
+          // a board may send frames at another size than its panel (the RP2350's
+          // are 240x240, shown 2x): a texture cannot change size, so make it again
+          if (su.cw !== cw || su.ch !== chh) { su.tex.dispose(); su.cw = cw; su.ch = chh; }
+          su.tex.needsUpdate = true; su.version = su.sc.version;
+        }
         if (m.userData.head) {
           m.userData.head.rotation.y = o.sonarAngle * DEG;
           var d = o.sonarCm !== null ? o.sonarCm / 100 : 0;

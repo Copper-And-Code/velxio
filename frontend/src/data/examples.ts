@@ -8643,13 +8643,13 @@ import lvgl as lv
 import time
 from machine import Pin, PWM
 
-CRUISE, TURN = 0.45, 0.65              # duty, 0..1
+CRUISE, TURN = 0.38, 0.6               # duty, 0..1
 
 left = PWM(Pin(1), freq=1000, duty_u16=0)
 right = PWM(Pin(2), freq=1000, duty_u16=0)
 line_l = Pin(40, Pin.IN)
 line_r = Pin(41, Pin.IN)
-state = {'run': True, 'l': None, 'r': None, 'ticks': 0, 't0': time.ticks_ms()}
+state = {'run': True, 'l': None, 'r': None, 'last': None, 'ticks': 0, 't0': time.ticks_ms()}
 
 GREEN, RED, GREY = 0x2ecc71, 0xff3b30, 0x5a6270
 
@@ -8729,17 +8729,26 @@ show_button()
 def drive(dl, dr):
     left.duty_u16(int(dl * 65535))
     right.duty_u16(int(dr * 65535))
-    bar_l.set_value(int(dl * 100), lv.ANIM.OFF)
-    bar_r.set_value(int(dr * 100), lv.ANIM.OFF)
+    bar_l.set_value(int(dl * 100), 0)          # 0: LV_ANIM_OFF
+    bar_r.set_value(int(dr * 100), 0)
 
 
 def tick(t):
     l, r = line_l.value(), line_r.value()
+    # The two sensors sit inside the tape: both see it while the robot is on it.
     if not state['run']:
         drive(0, 0)
-    elif l and not r:        # tape under the left sensor: turn left
+    elif l and not r:        # only the left one on the tape: turn left
+        state['last'] = 'l'
         drive(0, TURN)
-    elif r and not l:        # under the right one: turn right
+    elif r and not l:        # only the right one: turn right
+        state['last'] = 'r'
+        drive(TURN, 0)
+    elif l and r:            # on the tape
+        drive(CRUISE, CRUISE)
+    elif state['last'] == 'l':   # lost it: turn back to where it was last seen
+        drive(0, TURN)
+    elif state['last'] == 'r':
         drive(TURN, 0)
     else:
         drive(CRUISE, CRUISE)
@@ -8803,6 +8812,208 @@ print('line robot ready')
     { "id": "track1", "type": "track", "shape": "oval", "x": 0, "y": 0, "w": 2.1, "h": 1.1, "tape": 0.022 },
     { "id": "robot1", "type": "robot", "preset": "diff4", "x": -0.3, "y": -0.539, "rot": 0,
       "bind": { "left": ["rb-motor-l"], "right": ["rb-motor-r"], "line": ["rb-line-l", "rb-line-r"], "display": "esp32-4848s040" } }
+  ]
+}
+</script>
+<script>velxio.kit.start();</script>
+</body></html>
+` },
+  },
+  {
+    id: 'waveshare-rp2350-lcd4-line-robot',
+    title: 'RP2350-Touch-LCD-4: Line Robot with its screen (World kit)',
+    description:
+      'The Waveshare RP2350-Touch-LCD-4 and its 4" screen ride on a four-wheel robot in a World kit scene. A MicroPython app drives two DC motors through an L293D (PWM on GP8 and GP9), reads two IR line sensors (GP10, GP11) and shows them on an LVGL dashboard: touch STOP / START on the robot\'s screen in 3D.',
+    category: 'robotics',
+    difficulty: 'intermediate',
+    boardType: 'waveshare-rp2350-lcd4',
+    boardFilter: 'waveshare-rp2350-lcd4',
+    languageMode: 'micropython',
+    code: '',
+    files: [{ name: 'main.py', content: `# RP2350-Touch-LCD-4 line robot: the board and its 4" screen ride on the robot.
+#
+# Wiring (the free GPIOs of the board):
+#   GP8  -> L293D EN1 (left motor speed, PWM 4A)   left motor on OUT1/OUT2
+#   GP9  -> L293D EN2 (right motor speed, PWM 4B)  right motor on OUT3/OUT4
+#   L293D IN1, IN3 on 3V3 and IN2, IN4 on GND: both motors turn forward only
+#   GP10 <- left line sensor DO, GP11 <- right line sensor DO (1 over the tape)
+#
+# Open the World (3D button) and press Run. The screen on the robot is this
+# app: touch STOP / START on it, in the 3D scene or on the canvas.
+import display_driver
+import lvgl as lv
+import time
+from machine import Pin, PWM
+
+CRUISE, TURN = 0.38, 0.6               # duty, 0..1
+
+left = PWM(Pin(8), freq=1000, duty_u16=0)
+right = PWM(Pin(9), freq=1000, duty_u16=0)
+line_l = Pin(10, Pin.IN)
+line_r = Pin(11, Pin.IN)
+state = {'run': True, 'l': None, 'r': None, 'last': None, 'ticks': 0, 't0': time.ticks_ms()}
+
+GREEN, RED, GREY = 0x2ecc71, 0xff3b30, 0x5a6270
+
+
+def font(size):
+    return getattr(lv, 'font_montserrat_%d' % size, None)
+
+
+scr = lv.obj()
+scr.set_style_bg_color(lv.color_hex(0x10151c), 0)
+scr.remove_flag(lv.obj.FLAG.SCROLLABLE)
+
+title = lv.label(scr)
+title.set_text('LINE ROBOT')
+title.set_style_text_color(lv.color_hex(0xffffff), 0)
+if font(28):
+    title.set_style_text_font(font(28), 0)
+title.align(lv.ALIGN.TOP_MID, 0, 24)
+
+
+def eye(x):
+    o = lv.obj(scr)
+    o.set_size(120, 120)
+    o.set_style_radius(60, 0)
+    o.set_style_border_width(6, 0)
+    o.set_style_border_color(lv.color_hex(0xffffff), 0)
+    o.set_style_bg_color(lv.color_hex(GREY), 0)
+    o.remove_flag(lv.obj.FLAG.SCROLLABLE)
+    o.align(lv.ALIGN.TOP_MID, x, 90)
+    return o
+
+
+eye_l, eye_r = eye(-90), eye(90)
+
+
+def bar(y, text):
+    lab = lv.label(scr)
+    lab.set_text(text)
+    lab.set_style_text_color(lv.color_hex(0xc9ccd3), 0)
+    lab.align(lv.ALIGN.TOP_LEFT, 40, y + 4)
+    b = lv.bar(scr)
+    b.set_size(300, 26)
+    b.set_range(0, 100)
+    b.align(lv.ALIGN.TOP_LEFT, 140, y)
+    return b
+
+
+bar_l, bar_r = bar(250, 'LEFT'), bar(295, 'RIGHT')
+
+rate = lv.label(scr)
+rate.set_style_text_color(lv.color_hex(0x8a93a3), 0)
+rate.align(lv.ALIGN.TOP_RIGHT, -16, 16)
+
+btn = lv.button(scr)
+btn.set_size(220, 80)
+btn.align(lv.ALIGN.BOTTOM_MID, 0, -30)
+btn_label = lv.label(btn)
+btn_label.center()
+if font(28):
+    btn_label.set_style_text_font(font(28), 0)
+
+
+def show_button():
+    btn_label.set_text('STOP' if state['run'] else 'START')
+    btn.set_style_bg_color(lv.color_hex(RED if state['run'] else GREEN), 0)
+
+
+def toggle(e):
+    state['run'] = not state['run']
+    show_button()
+
+
+btn.add_event_cb(toggle, lv.EVENT.CLICKED, None)
+show_button()
+
+
+def drive(dl, dr):
+    left.duty_u16(int(dl * 65535))
+    right.duty_u16(int(dr * 65535))
+    bar_l.set_value(int(dl * 100), 0)          # 0: LV_ANIM_OFF
+    bar_r.set_value(int(dr * 100), 0)
+
+
+def tick(t):
+    l, r = line_l.value(), line_r.value()
+    # The two sensors sit inside the tape: both see it while the robot is on it.
+    if not state['run']:
+        drive(0, 0)
+    elif l and not r:        # only the left one on the tape: turn left
+        state['last'] = 'l'
+        drive(0, TURN)
+    elif r and not l:        # only the right one: turn right
+        state['last'] = 'r'
+        drive(TURN, 0)
+    elif l and r:            # on the tape
+        drive(CRUISE, CRUISE)
+    elif state['last'] == 'l':   # lost it: turn back to where it was last seen
+        drive(0, TURN)
+    elif state['last'] == 'r':
+        drive(TURN, 0)
+    else:
+        drive(CRUISE, CRUISE)
+    if l != state['l']:
+        state['l'] = l
+        eye_l.set_style_bg_color(lv.color_hex(RED if l else GREEN), 0)
+    if r != state['r']:
+        state['r'] = r
+        eye_r.set_style_bg_color(lv.color_hex(RED if r else GREEN), 0)
+    state['ticks'] += 1
+    dt = time.ticks_diff(time.ticks_ms(), state['t0'])
+    if dt >= 2000:                       # how often the loop runs: steering needs ~20/s
+        hz = state['ticks'] * 1000 // dt
+        rate.set_text('%d Hz' % hz)
+        print('loop', hz, 'Hz')
+        state['ticks'], state['t0'] = 0, time.ticks_ms()
+
+
+lv.timer_create(tick, 10, None)
+lv.screen_load(scr)
+display_driver.start()
+print('line robot ready')
+` }],
+    components: [
+      { type: 'velxio-motor-driver-l293d', id: 'rp-l293d', x: 470, y: 60, properties: {} },
+      { type: 'velxio-dc-motor', id: 'rp-motor-l', x: 640, y: 20, properties: { rpm: 200 } },
+      { type: 'velxio-dc-motor', id: 'rp-motor-r', x: 640, y: 110, properties: { rpm: 200 } },
+      { type: 'velxio-line-sensor', id: 'rp-line-l', x: 470, y: 230, properties: {} },
+      { type: 'velxio-line-sensor', id: 'rp-line-r', x: 540, y: 230, properties: {} },
+    ],
+    wires: [
+      { id: 'rp-en1', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GP8' }, end: { componentId: 'rp-l293d', pinName: 'EN1' }, color: '#ff8800' },
+      { id: 'rp-en2', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GP9' }, end: { componentId: 'rp-l293d', pinName: 'EN2' }, color: '#ff8800' },
+      { id: 'rp-in1', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-l293d', pinName: 'IN1' }, color: '#ff0000' },
+      { id: 'rp-in2', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GND' }, end: { componentId: 'rp-l293d', pinName: 'IN2' }, color: '#000000' },
+      { id: 'rp-in3', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-l293d', pinName: 'IN3' }, color: '#ff0000' },
+      { id: 'rp-in4', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GND' }, end: { componentId: 'rp-l293d', pinName: 'IN4' }, color: '#000000' },
+      { id: 'rp-vcc1', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-l293d', pinName: 'VCC1' }, color: '#ff0000' },
+      { id: 'rp-vcc2', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-l293d', pinName: 'VCC2' }, color: '#ff0000' },
+      { id: 'rp-gnd', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GND' }, end: { componentId: 'rp-l293d', pinName: 'GND.1' }, color: '#000000' },
+      { id: 'rp-ml1', start: { componentId: 'rp-l293d', pinName: 'OUT1' }, end: { componentId: 'rp-motor-l', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'rp-ml2', start: { componentId: 'rp-l293d', pinName: 'OUT2' }, end: { componentId: 'rp-motor-l', pinName: 'M-' }, color: '#555555' },
+      { id: 'rp-mr1', start: { componentId: 'rp-l293d', pinName: 'OUT3' }, end: { componentId: 'rp-motor-r', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'rp-mr2', start: { componentId: 'rp-l293d', pinName: 'OUT4' }, end: { componentId: 'rp-motor-r', pinName: 'M-' }, color: '#555555' },
+      { id: 'rp-ll-do', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GP10' }, end: { componentId: 'rp-line-l', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'rp-ll-v', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-line-l', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'rp-ll-g', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GND' }, end: { componentId: 'rp-line-l', pinName: 'GND' }, color: '#000000' },
+      { id: 'rp-lr-do', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GP11' }, end: { componentId: 'rp-line-r', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'rp-lr-v', start: { componentId: 'waveshare-rp2350-lcd4', pinName: '3V3' }, end: { componentId: 'rp-line-r', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'rp-lr-g', start: { componentId: 'waveshare-rp2350-lcd4', pinName: 'GND' }, end: { componentId: 'rp-line-r', pinName: 'GND' }, color: '#000000' },
+    ],
+    world: { open: true, html: `<!doctype html>
+<html><body>
+<script type="application/json" id="velxio-scene">
+{
+  "version": 1,
+  "view": "3d",
+  "follow": "robot1",
+  "floor": { "w": 2.4, "h": 1.6, "grid": true },
+  "objects": [
+    { "id": "track1", "type": "track", "shape": "oval", "x": 0, "y": 0, "w": 2.1, "h": 1.1, "tape": 0.022 },
+    { "id": "robot1", "type": "robot", "preset": "diff4", "x": -0.3, "y": -0.539, "rot": 0,
+      "bind": { "left": ["rp-motor-l"], "right": ["rp-motor-r"], "line": ["rp-line-l", "rp-line-r"], "display": "waveshare-rp2350-lcd4" } }
   ]
 }
 </script>

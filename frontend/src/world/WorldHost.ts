@@ -33,6 +33,8 @@ export interface WorldLogEntry {
   at: number;
 }
 
+/** The most wall time one frame advances a scene by (see simulatedDt). */
+const WALL_DT_MAX = 0.02;
 const FRAME_MS = 8;
 const ESP32_PANEL_TOUCH_PIN = 19;
 
@@ -197,6 +199,11 @@ export class WorldHost {
    * timer), so physics keeps step with the firmware whatever speed it is
    * emulated at; the wall time for a board whose clock is elsewhere (QEMU,
    * Renode). A jump (a new board, a reset) counts as one wall frame.
+   *
+   * Wall time is capped at WALL_DT_MAX per frame: while the page is busy (a
+   * slow 3D frame, a burst of messages) the scene slows down instead of
+   * jumping ahead of the sensor and motor messages still queued, so a
+   * firmware in another process keeps steering it.
    */
   private simulatedDt(boards: { id: string; running: boolean }[], wall: number): number {
     for (const b of boards) {
@@ -206,12 +213,12 @@ export class WorldHost {
       if (ms === null) continue;
       const prev = this.lastGuest;
       this.lastGuest = { id: b.id, ms };
-      if (!prev || prev.id !== b.id) return wall;
+      if (!prev || prev.id !== b.id) return Math.min(wall, WALL_DT_MAX);
       const d = (ms - prev.ms) / 1000;
-      return d >= 0 && d <= 0.25 ? d : wall;
+      return d >= 0 && d <= 0.25 ? d : Math.min(wall, WALL_DT_MAX);
     }
     this.lastGuest = null;
-    return wall;
+    return Math.min(wall, WALL_DT_MAX);
   }
 
   private start(): void {

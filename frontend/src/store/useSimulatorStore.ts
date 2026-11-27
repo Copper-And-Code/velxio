@@ -1404,10 +1404,13 @@ class Stm32H7BridgeShim {
   onPinChangeWithTime: ((pin: number, state: boolean, timeMs: number) => void) | null = null;
   onBaudRateChange: ((baud: number) => void) | null = null;
   private bridge: Stm32H7Bridge;
+  /** The RP2350 lane numbers its pads GP0-47, not port*16 + pin. */
+  private readonly gpPins: boolean;
 
-  constructor(bridge: Stm32H7Bridge, pm: PinManager) {
+  constructor(bridge: Stm32H7Bridge, pm: PinManager, gpPins = false) {
     this.bridge = bridge;
     this.pinManager = pm;
+    this.gpPins = gpPins;
   }
 
   /** The bridge stamps its edges with the page clock. */
@@ -1417,10 +1420,14 @@ class Stm32H7BridgeShim {
 
   /** Drive a GPIO input from the circuit; `pin` is linear (port*16 + pin). */
   setPinState(pin: number, state: boolean): void {
-    if (pin < 0 || pin > 127) return; // rails and unmapped pads
+    if (pin < 0 || pin > (this.gpPins ? 47 : 127)) return; // rails and unmapped pads
     if (this.pinManager.getOutputPins().has(pin)) return; // the firmware drives it
-    const name = stm32LinearToPinName(pin); // 'PA0'
-    this.bridge.setGpioInput(name[1], pin % 16, state);
+    if (this.gpPins) {
+      this.bridge.setGpioInputPin(pin, state);
+    } else {
+      const name = stm32LinearToPinName(pin); // 'PA0'
+      this.bridge.setGpioInput(name[1], pin % 16, state);
+    }
     this.pinManager.triggerPinChange(pin, state, 'external');
     this.onPinChangeWithTime?.(pin, state, performance.now());
   }
@@ -2593,13 +2600,25 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       bridge.onError = makeRunRefusedHandler(id, boardKind, serialCallback, () =>
         bridge.disconnect(),
       );
-      const shim = new Stm32H7BridgeShim(bridge, pm);
+      const gpPins = boardKind === 'waveshare-rp2350-lcd4';
+      const shim = new Stm32H7BridgeShim(bridge, pm, gpPins);
       shim.onPinChangeWithTime = getOscilloscopeCallback(id);
+      // RP2350: a pad a PWM channel drives counts as its duty (the parts
+      // that follow a pin read getPwmValue); null when PWM lets it go.
+      bridge.onPwm = (pin, duty) => {
+        pinManagerMap.get(id)?.updatePwm(pin, duty ?? 0);
+      };
+      // RP2350: a pad the firmware stops driving is an input again, so the
+      // parts and the solved circuit can drive it (an SD pin the boot used,
+      // then a Pin.IN of the app).
+      bridge.onGpioDir = (pin, dir) => {
+        pinManagerMap.get(id)?.setPinDirection(pin, dir);
+      };
       // The firmware's GPIO edges (backend ODR poll) reach the parts and the
       // netlist through the PinManager, on the linear pin. addGpioListener
       // and not the onGpioChange slot: Stm32H7Display listens too (its LEDs).
       bridge.addGpioListener((port, pin, state) => {
-        const linear = stm32PinNameToLinear(`P${port}${pin}`);
+        const linear = gpPins ? (port ? -1 : pin) : stm32PinNameToLinear(`P${port}${pin}`);
         if (linear < 0) return;
         pinManagerMap.get(id)?.triggerPinChange(linear, state, 'mcu');
         shim.onPinChangeWithTime?.(linear, state, performance.now());

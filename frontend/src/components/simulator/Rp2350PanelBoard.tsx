@@ -20,8 +20,18 @@ export const RP2350_PANEL_FRAME_W = Math.round(RP2350_PANEL_W * SCALE) + 2 * BEZ
 export const RP2350_PANEL_FRAME_H = Math.round(RP2350_PANEL_H * SCALE) + 2 * BEZEL + 22;
 const TOUCH_THROTTLE_MS = 33;
 
-/** Pads PinOverlay reads: the UART0 header (the REPL, GP46 TX / GP45 RX), 3V3, GND. */
+/** Pads PinOverlay reads: four GPIOs for a robot's motors and sensors (GP8,
+ *  GP9: UART1 on the board, PWM slice 4; GP10, GP11: the TF slot's CLK and
+ *  CMD, free without a card; which ones the real board's connectors break
+ *  out is still to be checked), then the UART0 header (the REPL, GP46 TX /
+ *  GP45 RX), 3V3, GND. */
 export const RP2350_PANEL_PINS = [
+  ...['GP8', 'GP9', 'GP10', 'GP11'].map((name, i) => ({
+    name,
+    x: 8,
+    y: RP2350_PANEL_FRAME_H - 128 + i * 14,
+    signals: [{ type: 'gpio', signal: name }],
+  })),
   { name: '3V3', x: 8, y: RP2350_PANEL_FRAME_H - 58, signals: [{ type: 'power', signal: 'VCC', voltage: 3.3 }] },
   { name: 'GP46', x: 8, y: RP2350_PANEL_FRAME_H - 44, signals: [{ type: 'uart', signal: 'TX' }] },
   { name: 'GP45', x: 8, y: RP2350_PANEL_FRAME_H - 30, signals: [{ type: 'uart', signal: 'RX' }] },

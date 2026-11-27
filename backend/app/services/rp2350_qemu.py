@@ -18,10 +18,18 @@ process per client:
     rp2350_stop
     rp2350_serial_input  {bytes: [int]}
     rp2350_touch_input   {x, y, pressed}   (panel coordinates, 0-479)
+    rp2350_gpio_input    {pin, value}      (GP0-47: a level the circuit drives;
+                                            value null lets the pad go)
 
 Events: serial_output {data}, framebuffer {width, height, pitch, source_width,
-source_height, scale, format: 'rgb565', bytes_b64}, system {event}, error
-{message}.
+source_height, scale, format: 'rgb565', bytes_b64}, rp2350_gpio_change {pin,
+value} (a pad the firmware drives changed level), rp2350_gpio_dir {pin, dir}
+(1: the firmware drives the pad, 0: it let it go), rp2350_pwm {pin, duty}
+(0..1 while a PWM channel drives the pad, null when it stops), system {event},
+error {message}.
+
+The GPIO block of the same file (version 2 of the layout) carries the pads:
+see GPIO_FILE_OFFSET in hw/arm/rp2350.c.
 """
 from __future__ import annotations
 
@@ -57,6 +65,11 @@ _FB_POLL_S = float(os.environ.get('VELXIO_RP2350_FB_POLL_MS', '40')) / 1000
 _PANEL_HEADER = 64
 _PANEL_SIZE = _PANEL_HEADER + 480 * 480 * 2
 _PANEL_MAGIC = 0x42465856
+_GPIO_OFFSET = _PANEL_SIZE
+_GPIO_SIZE = 256
+_GPIO_MAGIC = 0x4f495856
+_GPIO_COUNT = 48
+_GPIO_POLL_S = 0.005
 
 EventCallback = Callable[[str, dict], Awaitable[None]]
 
@@ -71,6 +84,10 @@ class Rp2350Instance:
             os.getpid(), ''.join(c for c in client_id if c.isalnum())[:32]))
         self.panel: mmap.mmap | None = None
         self.touch_serial = 0
+        self.gpio_ok = False        # the machine writes the GPIO block (layout v2)
+        # What the circuit drives, kept from the start: the first levels come
+        # before the machine has made its file, and must not be lost.
+        self.inputs: dict[int, bool | None] = {}
         self.tasks: list[asyncio.Task] = []
         self.running = False
 
@@ -142,6 +159,27 @@ class Rp2350Manager:
         y = max(0, min(479, y))
         struct.pack_into('<4I', inst.panel, 32, inst.touch_serial, x, y, 1 if pressed else 0)
 
+    def gpio_input(self, client_id: str, pin: int, value: bool | None) -> None:
+        """Drive pad `pin` from the circuit (None: let it go)."""
+        inst = self._instances.get(client_id)
+        if not inst or not 0 <= pin < _GPIO_COUNT:
+            return
+        inst.inputs[pin] = value
+        self._write_input(inst, pin, value)
+
+    @staticmethod
+    def _write_input(inst: Rp2350Instance, pin: int, value: bool | None) -> None:
+        if inst.panel is None or not inst.gpio_ok:
+            return
+        word = 4 * (pin >> 5)
+        bit = 1 << (pin & 31)
+        (level,) = struct.unpack_from('<I', inst.panel, _GPIO_OFFSET + 24 + word)
+        (mask,) = struct.unpack_from('<I', inst.panel, _GPIO_OFFSET + 32 + word)
+        level = (level | bit) if value else (level & ~bit)
+        mask = (mask & ~bit) if value is None else (mask | bit)
+        struct.pack_into('<I', inst.panel, _GPIO_OFFSET + 24 + word, level)
+        struct.pack_into('<I', inst.panel, _GPIO_OFFSET + 32 + word, mask)
+
     async def _read_serial(self, inst: Rp2350Instance) -> None:
         assert inst.process and inst.process.stdout
         booted = False
@@ -168,7 +206,13 @@ class Rp2350Manager:
             await inst.emit('error', {'message': 'RP2350: no panel file from the machine'})
             return
         with open(inst.panel_path, 'r+b') as f:
-            inst.panel = mmap.mmap(f.fileno(), _PANEL_SIZE)
+            size = os.fstat(f.fileno()).st_size
+            inst.gpio_ok = size >= _GPIO_OFFSET + _GPIO_SIZE
+            inst.panel = mmap.mmap(f.fileno(), _GPIO_OFFSET + _GPIO_SIZE if inst.gpio_ok else _PANEL_SIZE)
+        if inst.gpio_ok:
+            for pin, value in list(inst.inputs.items()):
+                self._write_input(inst, pin, value)
+            inst.tasks.append(asyncio.create_task(self._poll_gpio(inst)))
         last = 0
         while inst.running:
             magic, _ver, serial, w, h, scale = struct.unpack_from('<6I', inst.panel, 0)
@@ -183,6 +227,44 @@ class Rp2350Manager:
                     'bytes_b64': base64.b64encode(pixels).decode('ascii'),
                 })
             await asyncio.sleep(_FB_POLL_S)
+
+
+    async def _poll_gpio(self, inst: Rp2350Instance) -> None:
+        """Pad levels and PWM duties the firmware drives, as events."""
+        assert inst.panel is not None
+        if struct.unpack_from('<I', inst.panel, _GPIO_OFFSET)[0] != _GPIO_MAGIC:
+            return
+        last_serial = None
+        levels = [None] * _GPIO_COUNT
+        last_oe = 0
+        duties: list[float | None] = [None] * _GPIO_COUNT
+        while inst.running:
+            serial = struct.unpack_from('<I', inst.panel, _GPIO_OFFSET + 4)[0]
+            if serial != last_serial:
+                last_serial = serial
+                out_lo, out_hi, oe_lo, oe_hi = struct.unpack_from('<4I', inst.panel, _GPIO_OFFSET + 8)
+                raw = struct.unpack_from('<%dI' % _GPIO_COUNT, inst.panel, _GPIO_OFFSET + 64)
+                out = out_lo | (out_hi << 32)
+                oe = oe_lo | (oe_hi << 32)
+                for n in range(_GPIO_COUNT):
+                    if ((oe ^ last_oe) >> n) & 1:
+                        driven = (oe >> n) & 1
+                        if not driven:
+                            levels[n] = None    # the next time it drives, say its level again
+                        await inst.emit('rp2350_gpio_dir', {'pin': n, 'dir': driven})
+                last_oe = oe
+                for n in range(_GPIO_COUNT):
+                    duty = None if raw[n] == 0xffffffff else min(raw[n], 65536) / 65536
+                    if duty != duties[n]:
+                        duties[n] = duty
+                        await inst.emit('rp2350_pwm', {'pin': n, 'duty': duty})
+                    if not (oe >> n) & 1:
+                        continue
+                    level = bool((out >> n) & 1)
+                    if level != levels[n]:
+                        levels[n] = level
+                        await inst.emit('rp2350_gpio_change', {'pin': n, 'value': level})
+            await asyncio.sleep(_GPIO_POLL_S)
 
 
 rp2350_manager = Rp2350Manager()
@@ -200,6 +282,10 @@ async def handle_message(websocket, client_id: str, msg_type: str,
         raw = msg_data.get('bytes', [])
         if raw:
             await rp2350_manager.send_serial(client_id, bytes(raw))
+    elif msg_type == 'rp2350_gpio_input':
+        value = msg_data.get('value')
+        rp2350_manager.gpio_input(client_id, int(msg_data.get('pin', -1)),
+                                  None if value is None else bool(value))
     elif msg_type == 'rp2350_touch_input':
         rp2350_manager.touch(client_id, int(msg_data.get('x', 0)), int(msg_data.get('y', 0)),
                              bool(msg_data.get('pressed', False)))

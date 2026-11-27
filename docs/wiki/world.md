@@ -128,9 +128,21 @@ that board's screen on the robot, at its real size (the 4" panels 8.6 cm, the
 back by the robot's `displayTilt` (degrees from upright, 50 by default). It
 shows the live picture and takes touches, in 3D and in 2D (where it is drawn on
 top of the robot, its top toward the nose), so the app running on the board
-is the robot's dashboard. The board's own GPIOs drive the robot: on the
-ESP32-4848S040 the canvas has pads for IO1, IO2, IO40 and IO41 (which of them
-the real board's connectors break out is still to be checked).
+is the robot's dashboard. The board's own GPIOs drive the robot, through pads
+on its canvas frame (which of them the real boards' connectors break out is
+still to be checked):
+
+- ESP32-4848S040: IO1, IO2, IO40, IO41 (the QEMU worker: GPIO, LEDC PWM);
+- RP2350-Touch-LCD-4: GP8, GP9 (UART1 on the board, PWM slice 4), GP10,
+  GP11 (the TF slot's CLK and CMD, free without a card). The raspi-pico2
+  machine publishes its pads in the GPIO block of its panel file (levels,
+  direction, PWM duty from the PWM slices) and reads the levels the circuit
+  drives from it; the lane sends `rp2350_gpio_change`, `rp2350_gpio_dir` and
+  `rp2350_pwm`, and takes `rp2350_gpio_input`.
+
+A line sensor pair sits 1.6 cm apart by default (`lineSpacing` on the robot),
+inside a 2.2 cm tape: on the tape both read black, and a robot that sees
+neither has lost it.
 
 **Follow.** The **Follow** button, or `"follow": "<robot id>"` at the top of
 the scene, puts the camera close behind that robot and keeps it there (drag to
@@ -164,7 +176,15 @@ The gallery examples put them together:
 - **ESP32-4848S040: Line Robot with its screen (World kit)**: the panel board
   rides on a four-wheel robot; a MicroPython app drives the motors (PWM on IO1
   and IO2 into the L293D enables), reads the line sensors (IO40, IO41) and
-  shows them on an LVGL dashboard with a STOP / START button.
+  shows them on an LVGL dashboard with a STOP / START button;
+- **RP2350-Touch-LCD-4: Line Robot with its screen (World kit)**: the same on
+  the Waveshare board, GP8 / GP9 for the motors and GP10 / GP11 for the
+  sensors.
+
+Frames of a board whose clock this tab has (AVR, RP2040) carry its guest time;
+for the QEMU and Renode boards a frame advances the scene by the wall time, at
+most 20 ms, so a busy page slows the scene instead of letting it run ahead of
+the sensor and motor messages.
 
 ## A model from a file
 
