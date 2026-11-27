@@ -96,7 +96,7 @@ the frames' simulated time, and lets you edit it with the mouse.
 ```
 
 The format is the one of velxio.dev's World prompt; the kit is this fork's
-own implementation (`frontend/src/world/worldKit.ts`). Metres and degrees; the
+own implementation (`frontend/src/world/kit/`). Metres and degrees; the
 mat (`floor`, w x h, optional `color`) is centred on the origin, x to the
 right, y away from the viewer, `rot` counter-clockwise from +x. Every object
 has a unique `id`, `x`, `y`, and optional `rot`, `color`, `label`.
@@ -231,7 +231,15 @@ Add `robot.glb` with **Files** (up to 24 MB per file).
 
 - `frontend/src/world/worldRuntime.ts`: the page side (`window.velxio`), the
   CSP and the srcdoc.
-- `frontend/src/world/worldKit.ts`: `velxio.kit`, the kit scenes.
+- `frontend/src/world/kit/`: `velxio.kit`, the kit scenes, as TypeScript
+  modules: `scene.ts` (the JSON and what a save writes), `geometry.ts`,
+  `world.ts` (collisions, the sonar's ray, picking), `physics.ts`,
+  `raster.ts` (the floor the line sensors read), `view2d.ts`, `view3d.ts`,
+  and `index.ts` (`makeKit`: the state and the page). The kit runs inside the
+  World's page, which gets its scripts as text, so
+  `frontend/vite-plugin-world-kit.ts` bundles the directory into one script
+  (`virtual:world-kit`) and `worldKit.ts` hands it to the runtime. What needs
+  no page is unit-tested (`src/__tests__/world-kit-modules.test.ts`).
 - `frontend/src/world/WorldHost.ts`: the Velxio side: frames, sensors,
   buttons, screens, touch, files.
 - `frontend/src/world/worldCatalog.ts`: what the World sees of the circuit.

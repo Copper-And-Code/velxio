@@ -103,3 +103,9 @@ declare namespace JSX {
     'velxio-motor-driver-l293d': any;
   }
 }
+
+/** The World kit (src/world/kit/) bundled into one script: vite-plugin-world-kit.ts. */
+declare module 'virtual:world-kit' {
+  const source: string;
+  export default source;
+}

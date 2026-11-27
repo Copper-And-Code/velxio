@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
 import fs from 'fs';
+import { worldKitPlugin } from './vite-plugin-world-kit';
 
 /**
  * Vitest configuration — split out from `vite.config.ts` (Phase 1d-tests J).
@@ -67,6 +68,8 @@ const proOverlayPath =
     : path.resolve(__dirname, 'src/__pro_stub__');
 
 export default defineConfig({
+  // The World kit as a script (virtual:world-kit), as in vite.config.ts.
+  plugins: [worldKitPlugin()],
   resolve: {
     alias: {
       '@velxio': path.resolve(__dirname, 'src'),

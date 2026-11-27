@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import { worldKitPlugin } from './vite-plugin-world-kit'
 
 // https://vite.dev/config/
 // avr8js / rp2040js / @wokwi/elements are resolved from npm via package.json.
@@ -39,7 +40,7 @@ function exampleThumbsVersion(): string {
 }
 
 export default defineConfig(({ command }) => ({
-  plugins: [react()],
+  plugins: [react(), worldKitPlugin()],
   define: {
     __EXAMPLE_THUMBS_VERSION__: JSON.stringify(exampleThumbsVersion()),
   },
