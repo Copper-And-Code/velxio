@@ -71,6 +71,11 @@ _GPIO_MAGIC = 0x4f495856
 _GPIO_COUNT = 48
 _GPIO_POLL_S = 0.005
 _GPIO_MAGIC_TRIES = 200       # x 10 ms: how long the machine may take to fill the block
+# The edge log after the GPIO block (layout v3): every change of a pad's level
+# or direction, in order.
+_EDGE_OFFSET = _GPIO_OFFSET + _GPIO_SIZE
+_EDGE_HEADER = 16
+_EDGE_MAGIC = 0x56455856
 
 EventCallback = Callable[[str, dict], Awaitable[None]]
 
@@ -86,6 +91,7 @@ class Rp2350Instance:
         self.panel: mmap.mmap | None = None
         self.touch_serial = 0
         self.gpio_ok = False        # the machine writes the GPIO block (layout v2)
+        self.edge_capacity = 0      # records in its edge log (layout v3), 0: none
         # What the circuit drives, kept from the start: the first levels come
         # before the machine has made its file, and must not be lost.
         self.inputs: dict[int, bool | None] = {}
@@ -209,7 +215,7 @@ class Rp2350Manager:
         with open(inst.panel_path, 'r+b') as f:
             size = os.fstat(f.fileno()).st_size
             has_gpio = size >= _GPIO_OFFSET + _GPIO_SIZE
-            inst.panel = mmap.mmap(f.fileno(), _GPIO_OFFSET + _GPIO_SIZE if has_gpio else _PANEL_SIZE)
+            inst.panel = mmap.mmap(f.fileno(), size if has_gpio else _PANEL_SIZE)
         if has_gpio:
             # The machine gives the file its size first, then clears the GPIO
             # block and writes its magic: an input written before that would
@@ -219,6 +225,11 @@ class Rp2350Manager:
                     inst.gpio_ok = True
                     break
                 await asyncio.sleep(0.01)
+            # The edge log is filled before the GPIO magic is written.
+            if inst.gpio_ok and size >= _EDGE_OFFSET + _EDGE_HEADER:
+                magic, capacity = struct.unpack_from('<2I', inst.panel, _EDGE_OFFSET)
+                if magic == _EDGE_MAGIC and 0 < capacity <= (size - _EDGE_OFFSET - _EDGE_HEADER) // 8:
+                    inst.edge_capacity = capacity
         if inst.gpio_ok:
             for pin, value in list(inst.inputs.items()):
                 self._write_input(inst, pin, value)
@@ -240,38 +251,95 @@ class Rp2350Manager:
 
 
     async def _poll_gpio(self, inst: Rp2350Instance) -> None:
-        """Pad levels and PWM duties the firmware drives, as events."""
+        """What the firmware does with its pads, as events.
+
+        With the machine's edge log (layout v3) every change of a pad's level
+        or direction is sent, in the order it happened, as one
+        `rp2350_gpio_batch` a look: `events` is a list of [kind, pin, value,
+        time in us], kind 0 a level and 1 a direction. A bit-banged line (a
+        shift register's clock, a stepper driver's STEP) keeps all its edges.
+        Without the log, or when the lane fell behind it, the levels and
+        directions come from the block as they are at the time of the look
+        (`rp2350_gpio_dir`, `rp2350_gpio_change`). PWM duty and the pads'
+        pulls always come from the block (`rp2350_pwm`, `rp2350_gpio_pull`).
+        """
         assert inst.panel is not None
+        p = inst.panel
+        capacity = inst.edge_capacity
         last_serial = None
-        levels = [None] * _GPIO_COUNT
-        last_oe = 0
+        levels: list[bool | None] = [None] * _GPIO_COUNT
+        driven = 0
         duties: list[float | None] = [None] * _GPIO_COUNT
+        pulls: list[str | None] = [None] * _GPIO_COUNT
+        read: int | None = None             # the log's next record
         while inst.running:
-            serial = struct.unpack_from('<I', inst.panel, _GPIO_OFFSET + 4)[0]
-            if serial != last_serial:
+            from_block = capacity == 0
+            batch: list[list] = []
+            if capacity:
+                count = struct.unpack_from('<I', p, _EDGE_OFFSET + 8)[0]
+                if read is None:            # the first look: start from the block
+                    read, from_block = count, True
+                behind = (count - read) & 0xFFFFFFFF
+                records: tuple[int, ...] = ()
+                if 0 < behind <= capacity:
+                    records = tuple(
+                        struct.unpack_from('<Q', p, _EDGE_OFFSET + _EDGE_HEADER + 8 * ((read + i) % capacity))[0]
+                        for i in range(behind))
+                    # the machine may have gone round the log while it was read
+                    count = struct.unpack_from('<I', p, _EDGE_OFFSET + 8)[0]
+                if ((count - read) & 0xFFFFFFFF) > capacity:
+                    read, from_block, records = count, True, ()
+                else:
+                    read = (read + len(records)) & 0xFFFFFFFF
+                for rec in records:
+                    n, value, t_us = rec & 0x3F, bool(rec & 0x40), rec >> 8
+                    if n >= _GPIO_COUNT:
+                        continue
+                    if rec & 0x80:          # the pad starts or stops being driven
+                        if bool((driven >> n) & 1) == value:
+                            continue
+                        driven ^= 1 << n
+                        levels[n] = None
+                        batch.append([1, n, 1 if value else 0, t_us])
+                    elif levels[n] != value:
+                        levels[n] = value
+                        batch.append([0, n, value, t_us])
+            if batch:
+                await inst.emit('rp2350_gpio_batch', {'events': batch})
+
+            serial = struct.unpack_from('<I', p, _GPIO_OFFSET + 4)[0]
+            if serial != last_serial or from_block:
                 last_serial = serial
-                out_lo, out_hi, oe_lo, oe_hi = struct.unpack_from('<4I', inst.panel, _GPIO_OFFSET + 8)
-                raw = struct.unpack_from('<%dI' % _GPIO_COUNT, inst.panel, _GPIO_OFFSET + 64)
-                out = out_lo | (out_hi << 32)
-                oe = oe_lo | (oe_hi << 32)
-                for n in range(_GPIO_COUNT):
-                    if ((oe ^ last_oe) >> n) & 1:
-                        driven = (oe >> n) & 1
-                        if not driven:
-                            levels[n] = None    # the next time it drives, say its level again
-                        await inst.emit('rp2350_gpio_dir', {'pin': n, 'dir': driven})
-                last_oe = oe
+                out_lo, out_hi, oe_lo, oe_hi = struct.unpack_from('<4I', p, _GPIO_OFFSET + 8)
+                up_lo, up_hi, down_lo, down_hi = struct.unpack_from('<4I', p, _GPIO_OFFSET + 40)
+                raw = struct.unpack_from('<%dI' % _GPIO_COUNT, p, _GPIO_OFFSET + 64)
+                if from_block:
+                    out = out_lo | (out_hi << 32)
+                    oe = oe_lo | (oe_hi << 32)
+                    for n in range(_GPIO_COUNT):
+                        if ((oe ^ driven) >> n) & 1:
+                            if not (oe >> n) & 1:
+                                levels[n] = None    # the next time it drives, say its level again
+                            await inst.emit('rp2350_gpio_dir', {'pin': n, 'dir': (oe >> n) & 1})
+                    driven = oe
+                    for n in range(_GPIO_COUNT):
+                        if not (oe >> n) & 1:
+                            continue
+                        level = bool((out >> n) & 1)
+                        if level != levels[n]:
+                            levels[n] = level
+                            await inst.emit('rp2350_gpio_change', {'pin': n, 'value': level})
+                up = up_lo | (up_hi << 32)
+                down = down_lo | (down_hi << 32)
                 for n in range(_GPIO_COUNT):
                     duty = None if raw[n] == 0xffffffff else min(raw[n], 65536) / 65536
                     if duty != duties[n]:
                         duties[n] = duty
                         await inst.emit('rp2350_pwm', {'pin': n, 'duty': duty})
-                    if not (oe >> n) & 1:
-                        continue
-                    level = bool((out >> n) & 1)
-                    if level != levels[n]:
-                        levels[n] = level
-                        await inst.emit('rp2350_gpio_change', {'pin': n, 'value': level})
+                    pull = 'down' if (down >> n) & 1 else 'up' if (up >> n) & 1 else None
+                    if pull != pulls[n]:
+                        pulls[n] = pull
+                        await inst.emit('rp2350_gpio_pull', {'pin': n, 'pull': pull})
             await asyncio.sleep(_GPIO_POLL_S)
 
 

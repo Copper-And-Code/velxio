@@ -104,6 +104,8 @@ export class Stm32H7Bridge {
   onPwm: ((pin: number, duty: number | null) => void) | null = null;
   /** RP2350 lane: a pad's direction, 1 driven by the firmware, 0 released. */
   onGpioDir: ((pin: number, dir: 0 | 1) => void) | null = null;
+  /** RP2350: a pad's internal pull changed (1 up, 2 down, 0 none). */
+  onGpioPull: ((pin: number, pull: 0 | 1 | 2) => void) | null = null;
   private _legacyOnGpio: ((port: string, pin: number, value: boolean) => void) | null = null;
 
   get onGpioChange():
@@ -271,6 +273,27 @@ export class Stm32H7Bridge {
           // RP2350: 1 the firmware drives GPn, 0 it let it go (an input again).
           const pin = Number(msg.data.pin) | 0;
           if (pin >= 0 && pin < 48) this.onGpioDir?.(pin, Number(msg.data.dir) ? 1 : 0);
+          break;
+        }
+        case `${this.prefix}gpio_batch`: {
+          // RP2350: every edge since the lane last looked, in the order it
+          // happened: [kind, pin, value, guest time in us], kind 0 a level
+          // (gpio_change), 1 a direction (gpio_dir). A bit-banged line keeps
+          // all its edges, so a part that counts them counts right.
+          const events = Array.isArray(msg.data.events) ? (msg.data.events as unknown[][]) : [];
+          for (const ev of events) {
+            const pin = Number(ev[1]) | 0;
+            if (pin < 0 || pin >= 48) continue;
+            if (Number(ev[0]) === 1) this.onGpioDir?.(pin, ev[2] ? 1 : 0);
+            else for (const cb of this._gpioListeners) cb('', pin, Boolean(ev[2]));
+          }
+          break;
+        }
+        case `${this.prefix}gpio_pull`: {
+          // RP2350: the pad's internal pull ('up', 'down' or none).
+          const pin = Number(msg.data.pin) | 0;
+          const pull = msg.data.pull === 'up' ? 1 : msg.data.pull === 'down' ? 2 : 0;
+          if (pin >= 0 && pin < 48) this.onGpioPull?.(pin, pull);
           break;
         }
         case `${this.prefix}pwm`: {

@@ -140,7 +140,15 @@ still to be checked):
   drives from it; the lane sends `rp2350_gpio_change`, `rp2350_gpio_dir` and
   `rp2350_pwm`, and takes `rp2350_gpio_input`. `machine.reset()` and
   `machine.WDT` reset the board through its watchdog: the firmware starts
-  again and every pad is let go, so the motors stop.
+  again and every pad is let go, so the motors stop. The machine also keeps
+  an edge log after the block, every change of a pad's level or direction in
+  order: the lane sends it as `rp2350_gpio_batch`, so a line the firmware
+  bit-bangs (a shift register's clock, a stepper driver's STEP) keeps all
+  its edges, where a look at the block every 5 ms saw only the level of the
+  moment. A pad nothing drives reads its pull (`Pin.PULL_UP` reads 1; the
+  lane reports the pulls as `rp2350_gpio_pull`, for the netlist), and a level
+  the circuit drives raises the pin's interrupt (`Pin.irq`), within a
+  millisecond of guest time.
 
 A level the circuit drives reaches a backend board whenever it is written: one
 written while the WebSocket of the run is still opening is sent after the

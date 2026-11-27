@@ -2632,6 +2632,12 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
         pinManagerMap.get(id)?.setPinDirection(pin, dir);
         if (!dir) shim.padReleased(pin);
       };
+      // RP2350: the pad's internal pull, so the netlist stamps its weak
+      // resistor (a button to ground on a Pin.PULL_UP reads HIGH when open).
+      // The machine applies the pull itself to a pad nothing drives.
+      bridge.onGpioPull = (pin, pull) => {
+        pinManagerMap.get(id)?.setPinPull(pin, pull);
+      };
       // The firmware's GPIO edges (backend ODR poll) reach the parts and the
       // netlist through the PinManager, on the linear pin. addGpioListener
       // and not the onGpioChange slot: Stm32H7Display listens too (its LEDs).

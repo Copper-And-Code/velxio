@@ -10,6 +10,11 @@
  *  - the RP2350 shim dropped a level written while the firmware drove the pad
  *    (the boot uses GP10/GP11 for the SD card before the app makes them
  *    inputs), and nothing wrote it again when the pad was let go.
+ *
+ * And the other way round, what the RP2350's firmware does with its pads: the
+ * lane sends every edge in order (`rp2350_gpio_batch`, from the machine's edge
+ * log), where it used to send the level each pad had when it looked, every
+ * 5 ms; and the pads' pulls, for the netlist.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -155,5 +160,49 @@ describe('RP2350: a level written while the firmware drives the pad', () => {
     socket.receive('rp2350_gpio_dir', { pin: 10, dir: 0 });
     expect(pm.getOutputPins().has(10)).toBe(false);
     expect(pm.getPinState(10)).toBe(true);
+  });
+});
+
+describe('RP2350: what the firmware does with its pads', () => {
+  function board(id: string) {
+    useSimulatorStore.setState({ boards: [], components: [], wires: [] } as never);
+    useSimulatorStore.getState().addBoard('waveshare-rp2350-lcd4' as never, 0, 0, id);
+    const bridge = getStm32H7Bridge(id)!;
+    bridge.connect();
+    const socket = MockWebSocket.last!;
+    socket.open();
+    return { socket, pm: getBoardPinManager(id)! };
+  }
+
+  it('every edge of a batch reaches the parts, in order', () => {
+    const { socket, pm } = board('rp2350-edges');
+    const seen: Array<[number, boolean]> = [];
+    pm.onPinChange(9, (pin, high) => seen.push([pin, high]));     // a shift register's clock
+    pm.onPinChange(3, (pin, high) => seen.push([pin, high]));     // its data
+    socket.receive('rp2350_gpio_batch', {
+      events: [
+        [1, 9, 1, 100], [1, 3, 1, 100],
+        [0, 3, true, 105], [0, 9, true, 110], [0, 9, false, 120],     // a 1 clocked in
+        [0, 3, false, 125], [0, 9, true, 130], [0, 9, false, 140],    // then a 0
+        [0, 99, true, 150],                                            // not a pad: ignored
+      ],
+    });
+    expect(seen).toEqual([
+      [3, true], [9, true], [9, false],
+      [3, false], [9, true], [9, false],
+    ]);
+    expect(pm.getOutputPins().has(9)).toBe(true);
+    socket.receive('rp2350_gpio_batch', { events: [[1, 9, 0, 200]] });
+    expect(pm.getOutputPins().has(9)).toBe(false);
+  });
+
+  it('a pad\'s pull is known to the circuit', () => {
+    const { socket, pm } = board('rp2350-pulls');
+    socket.receive('rp2350_gpio_pull', { pin: 20, pull: 'up' });
+    socket.receive('rp2350_gpio_pull', { pin: 21, pull: 'down' });
+    expect(pm.getPinPull(20)).toBe(1);
+    expect(pm.getPinPull(21)).toBe(2);
+    socket.receive('rp2350_gpio_pull', { pin: 20, pull: null });
+    expect(pm.getPinPull(20)).toBe(0);
   });
 });

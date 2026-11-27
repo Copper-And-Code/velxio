@@ -12,6 +12,13 @@ clears the GPIO block and writes its magic: a lane that took the file on its
 size alone could write the inputs too early (wiped by the clear) and start a
 poll that found no block and gave up, leaving a run with no GPIO at all.
 Imports the real production module.
+
+From layout v3 the machine also keeps an edge log after the block. A look
+every few milliseconds at the block alone sees the level a pad has then: the
+edges of a bit-banged line between two looks were lost (a shift register's
+clock read as nothing at all). The lane sends the log's records in order, as
+one `rp2350_gpio_batch` a look, and goes back to the block when it has fallen
+further behind than the log is long. The pads' pulls come from the block.
 """
 
 from __future__ import annotations
@@ -132,3 +139,117 @@ def test_the_block_is_used_only_once_the_machine_has_filled_it(tmp_path):
     assert ('rp2350_gpio_change', {'pin': 9, 'value': True}) in events
     qemu.close()
     f.close()
+
+
+EDGE = rq._EDGE_OFFSET
+
+
+def _v3(tmp_path, events, capacity=8):
+    """An instance on a layout v3 file the "machine" has filled: the block, the log."""
+    async def cb(kind, data):
+        events.append((kind, data))
+
+    inst = rq.Rp2350Instance('c', cb, psram=False)
+    size = EDGE + rq._EDGE_HEADER + 8 * capacity
+    path = tmp_path / 'panel3.fb'
+    path.write_bytes(bytes(size))
+    f = open(path, 'r+b')
+    inst.panel = mmap.mmap(f.fileno(), size)
+    p = inst.panel
+    struct.pack_into('<I', p, OFF, rq._GPIO_MAGIC)
+    struct.pack_into('<%dI' % rq._GPIO_COUNT, p, OFF + 64, *([0xFFFFFFFF] * rq._GPIO_COUNT))
+    struct.pack_into('<2I', p, EDGE, rq._EDGE_MAGIC, capacity)
+    inst.gpio_ok = True
+    inst.edge_capacity = capacity
+    inst.running = True
+    return inst, f, p
+
+
+def _log(p, capacity, pad, direction, value, t_us):
+    """What the machine does for one record: the record, then the count."""
+    count = struct.unpack_from('<I', p, EDGE + 8)[0]
+    rec = pad | (0x40 if value else 0) | (0x80 if direction else 0) | (t_us << 8)
+    struct.pack_into('<Q', p, EDGE + rq._EDGE_HEADER + 8 * (count % capacity), rec)
+    struct.pack_into('<I', p, EDGE + 8, (count + 1) & 0xFFFFFFFF)
+
+
+def _run(mgr, inst, steps):
+    async def run():
+        task = asyncio.create_task(mgr._poll_gpio(inst))
+        for step in steps:
+            await asyncio.sleep(0.04)
+            step()
+        await asyncio.sleep(0.04)
+        inst.running = False
+        await asyncio.sleep(0.02)
+        task.cancel()
+
+    asyncio.run(run())
+
+
+def test_every_edge_between_two_looks_is_sent_in_order(tmp_path):
+    events = []
+    inst, f, p = _v3(tmp_path, events)
+
+    def pulses():
+        # GP9 starts being driven, low, then two pulses and GP3 in between
+        _log(p, 8, 9, True, True, 100)
+        _log(p, 8, 9, False, False, 100)
+        _log(p, 8, 9, False, True, 110)
+        _log(p, 8, 3, True, True, 112)
+        _log(p, 8, 3, False, True, 112)
+        _log(p, 8, 9, False, False, 120)
+        _log(p, 8, 9, False, True, 130)
+        # the block as it is after them: all the old look could see
+        struct.pack_into('<4I', p, OFF + 8, (1 << 9) | (1 << 3), 0, (1 << 9) | (1 << 3), 0)
+        struct.pack_into('<I', p, OFF + 4, 1)
+
+    _run(rq.Rp2350Manager(), inst, [pulses])
+    f.close()
+    batches = [d['events'] for k, d in events if k == 'rp2350_gpio_batch']
+    assert batches == [[
+        [1, 9, 1, 100], [0, 9, False, 100], [0, 9, True, 110],
+        [1, 3, 1, 112], [0, 3, True, 112],
+        [0, 9, False, 120], [0, 9, True, 130],
+    ]]
+    # nothing is said twice from the block
+    assert not any(k in ('rp2350_gpio_change', 'rp2350_gpio_dir') for k, _ in events)
+
+
+def test_a_lane_that_fell_behind_takes_the_block(tmp_path):
+    events = []
+    inst, f, p = _v3(tmp_path, events, capacity=8)
+
+    def flood():
+        for i in range(20):                 # more than the log holds between two looks
+            _log(p, 8, 9, False, bool(i & 1), 100 + i)
+        struct.pack_into('<4I', p, OFF + 8, 1 << 9, 0, 1 << 9, 0)
+        struct.pack_into('<I', p, OFF + 4, 1)
+
+    def one_more():
+        _log(p, 8, 9, False, False, 500)
+
+    _run(rq.Rp2350Manager(), inst, [flood, one_more])
+    f.close()
+    assert ('rp2350_gpio_dir', {'pin': 9, 'dir': 1}) in events
+    assert ('rp2350_gpio_change', {'pin': 9, 'value': True}) in events
+    # and follows the log again from there
+    assert [d['events'] for k, d in events if k == 'rp2350_gpio_batch'] == [[[0, 9, False, 500]]]
+
+
+def test_pulls_come_from_the_block(tmp_path):
+    events = []
+    inst, f, p = _v3(tmp_path, events)
+
+    def pulled():
+        struct.pack_into('<4I', p, OFF + 40, 1 << 20, 1 << (41 - 32), 1 << 21, 0)
+        struct.pack_into('<I', p, OFF + 4, 1)
+
+    def released():
+        struct.pack_into('<4I', p, OFF + 40, 0, 1 << (41 - 32), 1 << 21, 0)
+        struct.pack_into('<I', p, OFF + 4, 2)
+
+    _run(rq.Rp2350Manager(), inst, [pulled, released])
+    f.close()
+    pulls = [(d['pin'], d['pull']) for k, d in events if k == 'rp2350_gpio_pull']
+    assert pulls == [(20, 'up'), (21, 'down'), (41, 'up'), (20, None)]
