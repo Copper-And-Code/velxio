@@ -22,7 +22,7 @@ The Studio apps are generated: change a project in Copper and Code Studio, then 
 every Studio example whose screen is 1024x600, runs Studio's board generator for the
 STM32H7_CORE V1.3, and writes its `app_main.py`, `ui.py`, `app_events.py`... plus a
 `main.py` that imports `app_main`. Velxio writes the modules onto the board's `/flash`
-(a littlefs in RAM in the VELXIO firmware) and runs `main.py`. Their thumbnails are
+(a FAT on the emulated QSPI flash) and runs `main.py`. Their thumbnails are
 captures of the running apps (`public/examples-thumbs/studio-<name>.webp`).
 
 > Totals are approximate — the lists grow regularly. The numbers above are the values at the last documentation refresh.

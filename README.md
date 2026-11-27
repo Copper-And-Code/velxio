@@ -29,7 +29,7 @@ An open-source multi-board emulator and circuit simulator. Write Arduino C++, Mi
 
 | Board | Emulated by | Screen and touch | Notes |
 |---|---|---|---|
-| STM32H743 Core V1.3 (`stm32h7-core-v13`) | [Renode](https://renode.io) | 1024x600 LTDC, GT911 | 32 MB SDRAM; `/flash` is a littlefs in RAM |
+| STM32H743 Core V1.3 (`stm32h7-core-v13`) | [Renode](https://renode.io) | 1024x600 LTDC, GT911 | 32 MB SDRAM; `/flash` is a FAT on the emulated 16 MB QSPI flash (W25Q128) |
 | ESP32-4848S040 (`esp32-4848s040`) | QEMU `esp32s3-picsimlab`, [Copper-And-Code/qemu-picsimlab](https://github.com/Copper-And-Code/qemu-picsimlab) | 480x480 RGB, GT911 | 8 MB octal PSRAM; **WiFi** to the Internet through the emulated `Velxio-GUEST` access point |
 | Waveshare RP2350-Touch-LCD-4 (`waveshare-rp2350-lcd4`) | QEMU `raspi-pico2`, [Copper-And-Code/qemu-rp2040-pico](https://github.com/Copper-And-Code/qemu-rp2040-pico) | 480x480 RGB, GT911 | started with 8 MB PSRAM, so the Studio apps run at 480x480; no radio, as the real board |
 

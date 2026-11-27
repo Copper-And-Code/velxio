@@ -37,6 +37,8 @@ _REPO_ROOT   = os.environ.get(
 RENODE_BIN   = os.environ.get('RENODE_BIN', 'renode')
 REPL_PATH    = os.path.join(_REPO_ROOT, 'renode', 'platforms', 'stm32h7_core_v13.repl')
 FB_SERVER_PY = os.path.join(_REPO_ROOT, 'renode', 'extensions', 'velxio_framebuffer_server.py')
+# SPI.Winbond_W25Q, the QSPI flash of the .repl: Renode compiles it at run time.
+W25Q_CS      = os.path.join(_REPO_ROOT, 'renode', 'extensions', 'Winbond_W25Q.cs')
 # Firmware: the STM32H7_CORE VELXIO variant of Copper-And-Code/copper-and-code-mcu-boards
 # (`scripts/build.sh stm32 STM32H7_CORE VELXIO`), copied to prebuilt/stm32h7/ as
 # the Docker image expects it; STM32H7_CORE_FIRMWARE overrides the path.
@@ -203,6 +205,7 @@ $bin?=@{firmware}
 
 using sysbus
 mach create "h743_{mach_id}"
+include @{w25q_cs}
 machine LoadPlatformDescription @{repl}
 
 logLevel 3
@@ -428,6 +431,7 @@ class RenodeManager:
             mach_id=mach_id,
             firmware=inst.firmware_path,
             repl=REPL_PATH,
+            w25q_cs=W25Q_CS,
             uart_port=inst.uart_port,
             fb_port=inst.fb_port,
             fb_server_boot=(

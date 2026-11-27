@@ -14,8 +14,8 @@ the result to frontend/src/data/examples-studio-stm32h7.ts:
   - app_main.py, ui.py, app_events.py, board_adapter.py and the project's own
                  modules, as Studio generated them
 
-Velxio writes every file but main.py onto the board's /flash (a littlefs in RAM
-in the VELXIO firmware), then runs main.py. A project whose screen is not
+Velxio writes every file but main.py onto the board's /flash (a FAT on the
+emulated QSPI flash), then runs main.py. A project whose screen is not
 1024x600 is skipped with Studio's reason (most are made for the 480x480
 ESP32-4848S040).
 

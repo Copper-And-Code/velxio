@@ -37,9 +37,7 @@ sysbus:
 qspiFlashMemory: Memory.MappedMemory @ sysbus 0x90000000
     size: 0x1000000
 
-qspiFlash: SPI.GenericSpiFlash @ qspi
+// SPI.Winbond_W25Q is renode/extensions/Winbond_W25Q.cs: the .resc includes it
+// before LoadPlatformDescription (0xEB dummy bytes, Status Register-2).
+qspiFlash: SPI.Winbond_W25Q @ qspi
     underlyingMemory: qspiFlashMemory
-    manufacturerId: 0xEF
-    memoryType: 0x40
-    extendedDeviceId: 0x00
-    capacityCode: 0x18

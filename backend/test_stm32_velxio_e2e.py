@@ -123,6 +123,15 @@ async def main() -> int:
             print(text()[-2000:])
             return 1
         print('REPL up')
+        # /flash: the FAT on the QSPI flash (renode/extensions/Winbond_W25Q.cs)
+        if "can't mount flash" in text():
+            failures.append('the QSPI flash was not mounted')
+        await run("import os; f = open('/flash/e2e.txt', 'w'); f.write('qspi'); f.close()")
+        m = await run("print('FLASH', os.statvfs('/flash')[2], open('/flash/e2e.txt').read())",
+                      expect=r'FLASH (\d+) (\w+)')
+        if not m or m.group(2) != 'qspi' or int(m.group(1)) < 1000:
+            failures.append('no file round trip on /flash')
+        print(m.group(0) if m else 'no FLASH line')
         for line in APP:
             if not await run(line):
                 failures.append('no prompt after: ' + line)

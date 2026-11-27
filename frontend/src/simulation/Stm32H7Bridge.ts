@@ -129,8 +129,8 @@ export class Stm32H7Bridge {
   // ── Program upload (MicroPython on the STM32H7_CORE VELXIO firmware) ──────
   // The same session as the ESP32 bridges (simulation/micropythonSession.ts):
   // banner -> raw REPL -> each project file written onto /flash in bounded
-  // steps -> the program started. /flash is the firmware's littlefs in RAM
-  // (velxio_boot.py), since Renode cannot mount the QSPI flash.
+  // steps -> the program started. /flash is the FAT on the board's QSPI flash
+  // (renode/extensions/Winbond_W25Q.cs), fresh at every boot.
   private _pendingProgram: MpyProgram | null = null;
   private _mpySession: MicroPythonSession | null = null;
 

@@ -8,6 +8,7 @@ $renodelog?="/tmp/renode_velxio_repl.log"
 
 using sysbus
 mach create "h743_velxio"
+include @renode/extensions/Winbond_W25Q.cs
 machine LoadPlatformDescription @renode/platforms/stm32h7_core_v13.repl
 
 logLevel 3
