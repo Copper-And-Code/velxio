@@ -9,7 +9,7 @@
 #   VELXIO firmwares               Copper-And-Code/copper-and-code-mcu-boards (velxio)
 # A new build: publish it there, then change its line here.
 
-tar  https://github.com/Copper-And-Code/qemu-picsimlab/releases/download/velxio-2026.11.27/velxio-qemu-esp32-velxio-2026.11.27-linux-x86_64.tar.gz  3b637960583e31a8712591cebe095a3f9a7becdd06b12cda7ca8d49699f42456  prebuilt/qemu
+tar  https://github.com/Copper-And-Code/qemu-picsimlab/releases/download/velxio-2026.11.27b/velxio-qemu-esp32-velxio-2026.11.27b-linux-x86_64.tar.gz  fddb5b9828d1fa7518c7dbe823d8afb2ed3992773381ab22a1ca7a8df291c975  prebuilt/qemu
 tar  https://github.com/Copper-And-Code/qemu-rp2040-pico/releases/download/velxio-2026.11.26/velxio-qemu-rp2350-velxio-2026.11.26-linux-x86_64.tar.gz  56e3efb79d8aa0d406e8ab80d7c39dc6a2fb325e1038e29c90edf2712dabad42  prebuilt/qemu
 
 file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/ESP32_4848S040-VELXIO-v0.1.8-24-g92363ea.bin  c5abfcc51e975ce03587266bef3867fbd48254204edce2fb161ec66b749e9a5d  frontend/public/firmware/micropython-esp32-4848s040-velxio.bin
