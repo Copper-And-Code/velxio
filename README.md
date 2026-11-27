@@ -56,7 +56,13 @@ The firmware talks to the virtual devices at fixed addresses (`0x21000000` on th
 scripts/fetch-prebuilt.sh      # -> prebuilt/qemu, prebuilt/rp2350, prebuilt/stm32h7, frontend/public/firmware
 ```
 
-then run the backend and the frontend as in [Option C](#option-c-manual-setup-frontend--backend-separately) (Renode for the STM32H743 Core: [docs/STM32H7_MANUAL_TEST.md](docs/STM32H7_MANUAL_TEST.md)), or `docker build -f Dockerfile.standalone .`, which copies `prebuilt/` into the image. How the binaries are built and where their sources are: [docs/BUILD-QEMU.md](docs/BUILD-QEMU.md).
+then run the backend and the frontend as in [Option C](#option-c-manual-setup-frontend--backend-separately) (Renode for the STM32H743 Core: [docs/STM32H7_MANUAL_TEST.md](docs/STM32H7_MANUAL_TEST.md)), or `docker build -f Dockerfile.standalone .`, which copies `prebuilt/` into the image. A built image of this branch, with the binaries of the lock (linux/amd64, `.github/workflows/docker-fork.yml`):
+
+```bash
+docker run -d --name velxio -p 3080:80 -v velxio-data:/app/data ghcr.io/copper-and-code/velxio:stm32h7-renode
+```
+
+How the binaries are built and where their sources are: [docs/BUILD-QEMU.md](docs/BUILD-QEMU.md).
 
 **Branches.** `stm32h7-renode` (the default) carries this work; `master` follows upstream Velxio.
 
