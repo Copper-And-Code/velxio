@@ -1102,6 +1102,8 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
             uart_tx_signals,
             spi_units,
             spi_cs_signals,
+            ledc_translation,
+            ledc_channel_count,
         )
     except ImportError:
         import importlib.util as _ilu, pathlib as _pl
@@ -1121,6 +1123,8 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         uart_tx_signals = sys.modules['esp32_signals'].uart_tx_signals
         spi_units = sys.modules['esp32_signals'].spi_units
         spi_cs_signals = sys.modules['esp32_signals'].spi_cs_signals
+        ledc_translation = sys.modules['esp32_signals'].ledc_translation
+        ledc_channel_count = sys.modules['esp32_signals'].ledc_channel_count
     _signal_router = SignalRouter()
     # The routes the frontend has been told about, as `gpio_routing` events.
     # Kept apart from `_signal_router` on purpose: `_on_gpio_matrix` updates
@@ -1128,6 +1132,10 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
     # still unannounced (see diff_routes).
     _emitted_routes: dict[int, int] = {}
     _rmt_sig_base = rmt_signal_base(machine)
+    # LEDC channel / signal ids in the ESP32's unified space the frontend
+    # speaks (identities on the ESP32; the S3 has low-speed channels only).
+    _ledc_channel_out, _ledc_signal_out = ledc_translation(machine)
+    _ledc_channels = ledc_channel_count(machine)
     _i2c_sda_sig = i2c_sda_signals(machine)
     _uart_tx_sig = uart_tx_signals(machine)
     _spi_unit_of = spi_units(machine)
@@ -1223,15 +1231,13 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
             out_sel_ptr = lib.qemu_picsimlab_get_internals(2)
             if not out_sel_ptr:
                 return
-            out_sel = (ctypes.c_uint32 * 40).from_address(out_sel_ptr)
+            out_sel = (ctypes.c_uint32 * _GPIO_COUNT).from_address(out_sel_ptr)
             snapshot: dict[int, int] = {}
-            for gpio_pin in range(40):
-                signal_id = int(out_sel[gpio_pin]) & 0xFF
-                # 0..71 / 88..255 are signal sources velxio doesn't
-                # model yet; include them in the snapshot only if the
-                # firmware actively routed them so future peripherals
-                # can opt in without code changes here.
-                if SIG_LEDC_HS_CH0_OUT_IDX <= signal_id <= SIG_LEDC_LS_CH_LAST:
+            for gpio_pin in range(_GPIO_COUNT):
+                # Only the LEDC window, as the ESP32's ids (the S3's 73-80
+                # become 79-86): other signal sources are not modelled here.
+                signal_id = _ledc_signal_out(int(out_sel[gpio_pin]) & 0xFF)
+                if signal_id is not None:
                     snapshot[gpio_pin] = signal_id
             # Diff against what was last EMITTED, not against the router:
             # _on_gpio_matrix has usually updated the router already and a
@@ -1900,7 +1906,7 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 # duty only, no gpio.  The frontend resolves channel →
                 # signal_id → pins via its mirror.
                 _emit({'type': 'ledc_duty',
-                       'channel': ledc_ch,
+                       'channel': _ledc_channel_out(ledc_ch),
                        'duty_pct': intensity})
             return
 
@@ -2026,8 +2032,8 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
             sid_lo = signal_id & 0xFF
             if signal_id == 0x100:
                 _signal_router.clear_routing(gpio)
-            elif SIG_LEDC_HS_CH0_OUT_IDX <= sid_lo <= SIG_LEDC_LS_CH_LAST:
-                _signal_router.update_routing(gpio, sid_lo)
+            elif _ledc_signal_out(sid_lo) is not None:
+                _signal_router.update_routing(gpio, _ledc_signal_out(sid_lo))
             # Other signal_id values fall outside what the frontend
             # SignalRouter currently cares about; future peripherals
             # extend the range above.
@@ -3412,7 +3418,9 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 ptr = lib.qemu_picsimlab_get_internals(6)  # LEDC_CHANNEL_DUTY
                 if ptr is None or ptr == 0:
                     continue
-                arr = (ctypes.c_float * 16).from_address(ptr)
+                # The chip's own table: 16 on the ESP32, 8 on the S3 (past
+                # them is the rest of the LEDC state, not duties).
+                arr = (ctypes.c_float * _ledc_channels).from_address(ptr)
                 # Reconcile the GPIO Matrix mirror first; any routing
                 # changes since the last poll are emitted as
                 # `gpio_routing` events so frontend's SignalRouter is
@@ -3421,7 +3429,7 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 # Reconcile internal pull-up/down config (INPUT_PULLUP etc.)
                 # so the frontend's netlist can add the matching resistor.
                 _refresh_pin_pulls()
-                for ch in range(16):
+                for ch in range(_ledc_channels):
                     duty_pct = float(arr[ch])
                     if abs(duty_pct - _last_duty[ch]) < 0.01:
                         continue
@@ -3435,7 +3443,7 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                         # above 100 %.
                         rounded = round(min(duty_pct, 100.0), 2)
                         _emit({'type': 'ledc_duty',
-                               'channel': ch,
+                               'channel': _ledc_channel_out(ch),
                                'duty_pct': rounded})
             except Exception:
                 pass

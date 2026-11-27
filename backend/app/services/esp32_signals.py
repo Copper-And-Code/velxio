@@ -112,6 +112,49 @@ def channel_for_ledc_signal(signal_id: int) -> int | None:
     return None
 
 
+# ── LEDC on chips with low-speed channels only ────────────────────────────
+# The ESP32-S3's LEDC has 8 channels, all low-speed: LEDC_LS_SIG_OUT0..7_IDX
+# are 73-80 in its matrix (components/soc/esp32s3/include/soc/gpio_sig_map.h),
+# and QEMU's 0x5000 duty callback numbers them 0-7. The frontend speaks the
+# ESP32's unified space above (0-7 HS, 8-15 LS, signals 71-86), so the worker
+# translates at its boundary: S3 channel n is unified LS channel 8 + n, and
+# S3 signal 73 + n is 79 + n. The C3 is the same with 6 channels on 45-50.
+# A chip missing here (the ESP32) needs nothing.
+LEDC_LS_ONLY_BY_CHIP = {
+    'esp32-s3': (73, 8),   # (LEDC_LS_SIG_OUT0_IDX, channels)
+    'esp32-c3': (45, 6),
+}
+
+
+def ledc_channel_count(machine: str) -> int:
+    """How many channels QEMU's LEDC duty table has on this chip."""
+    entry = LEDC_LS_ONLY_BY_CHIP.get(_chip_of(machine or ''))
+    return 16 if entry is None else entry[1]
+
+
+def ledc_translation(machine: str):
+    """(channel_to_unified, signal_to_unified) for a machine string.
+
+    Both are identities on the ESP32. On a chip in LEDC_LS_ONLY_BY_CHIP,
+    channel_to_unified maps QEMU's channel to the unified one, and
+    signal_to_unified maps the chip's LEDC signal id to the ESP32's (None
+    for a signal that is not one of its LEDC channels)."""
+    entry = LEDC_LS_ONLY_BY_CHIP.get(_chip_of(machine or ''))
+    if entry is None:
+        def same_signal(sig: int) -> int | None:
+            if SIG_LEDC_HS_CH0_OUT_IDX <= sig <= SIG_LEDC_LS_CH_LAST:
+                return sig
+            return None
+        return (lambda ch: ch), same_signal
+    base, count = entry
+
+    def to_unified(sig: int) -> int | None:
+        if base <= sig < base + count:
+            return SIG_LEDC_LS_CH0_OUT_IDX + (sig - base)
+        return None
+    return (lambda ch: 8 + ch), to_unified
+
+
 # ── Sentinel for "GPIO not routed to any peripheral" ──────────────────────
 # When `gpio_out_sel[N]` carries this value the pin is driven by
 # normal GPIO output (the value in the GPIO_OUT_REG bit N), not a
@@ -129,6 +172,8 @@ __all__ = [
     "rmt_signal_base",
     "ledc_signal_for_channel",
     "channel_for_ledc_signal",
+    "ledc_translation",
+    "ledc_channel_count",
 ]
 
 
