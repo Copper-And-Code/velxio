@@ -45,10 +45,14 @@ const info = await velxio.ready();
 
 velxio.onFrame((f) => {          // about 125 times per second
   // f.t       seconds the boards have run since Run (null while stopped)
-  // f.dt      seconds since the previous frame (0 while stopped): step physics with this
+  // f.dt      simulated seconds since the previous frame (0 while stopped): step physics
+  //           with this. It is the board's own clock where this tab has it (AVR, RP2040),
+  //           so the scene keeps step with a firmware emulated slower than real time;
+  //           the wall clock for the QEMU and Renode boards.
   // f.running true while a board runs
   // f.parts   { [id]: {on, brightness} LEDs, {on, r, g, b} RGB LEDs,
-  //             {angle} servos and steppers, {on} buzzers }
+  //             {angle} servos and steppers, {on} buzzers,
+  //             {drive, rpm} DC motors: drive -1..1, the duty across M+/M- }
 });
 velxio.set(partId, values);      // a sensor's inputs (the keys it lists, clamped):
                                  // the same values as its sensor panel's sliders
@@ -68,6 +72,78 @@ velxio.telemetry({ speed: 1.2 }); // shown in the World bar
 
 The panel boards with a screen are `stm32h7-core-v13` (1024x600),
 `esp32-4848s040` and `waveshare-rp2350-lcd4` (480x480).
+
+## Kit scenes: `velxio.kit`
+
+For robots on a mat there is no code to write: the page is a JSON scene, and
+the kit draws it (3D with three.js, or 2D), runs the physics and the sensors on
+the frames' simulated time, and lets you edit it with the mouse.
+
+```html
+<!doctype html>
+<html><body>
+<script type="application/json" id="velxio-scene">
+{ "version": 1, "view": "3d", "floor": { "w": 2.4, "h": 1.6, "grid": true },
+  "objects": [
+    { "id": "track1", "type": "track", "shape": "loop", "x": 0, "y": 0, "w": 2.1, "h": 0.9, "tape": 0.022 },
+    { "id": "robot1", "type": "robot", "preset": "diff2", "x": -0.3, "y": -0.439, "rot": 0,
+      "bind": { "left": ["motorL"], "right": ["motorR"], "line": ["lineL", "lineR"], "sonar": "sonar1" } },
+    { "id": "box1", "type": "box", "x": 0.7, "y": 0, "w": 0.15, "d": 0.15, "h": 0.15 }
+  ] }
+</script>
+<script>velxio.kit.start();</script>
+</body></html>
+```
+
+The format is the one of velxio.dev's World prompt; the kit is this fork's
+own implementation (`frontend/src/world/worldKit.ts`). Metres and degrees; the
+mat (`floor`, w x h, optional `color`) is centred on the origin, x to the
+right, y away from the viewer, `rot` counter-clockwise from +x. Every object
+has a unique `id`, `x`, `y`, and optional `rot`, `color`, `label`.
+
+| type | fields | what it does |
+|---|---|---|
+| `robot` | `preset` `diff2` (15 x 10.5 cm), `diff4` (20 x 11.5, skid steer), `tank` (22.5 x 22, tracks), `maqueen-lite` (8.5 x 8.1); `bind` | drives from its motors, stops against solids, climbs steps up to 1 / 1.5 / 3 / 0.6 cm and ramps up to 17 / 20 / 30 / 14 degrees |
+| `track` | `shape` `loop`, `oval`, `figure8`, `line`; `w`, `h` (the tape's outer edge), `tape` (width, ~0.022) | black tape on the mat, what line sensors read |
+| `box`, `wall` | `w`, `d`, `h` | solid; the sonar sees it (lower than a robot's climb: drives onto it) |
+| `cylinder` | `r`, `h` | solid, round |
+| `ramp` | `profile` `wedge` (rises toward +x), `bridge` (up, flat, down), `hill`; `w`, `d`, `h` | robots ride it if gentle enough, else it stops them |
+| `arm` | `bind`: `base`, `shoulder`, `elbow`, `gripper` servo ids | a four-servo arm that follows the servos |
+
+A robot's `bind`: `left`, `right` (motor ids per side: `dc-motor` parts, or
+any part with a `drive` output), `invertLeft` / `invertRight` (a side whose
+forward is a negative drive), `line` (line sensor ids, left to right across
+the front: 3 cm apart for two, 1.6 cm for more; the kit writes each one's
+first input, `reflectance` 0..100 on the `line-sensor`), `sonar` (an HC-SR04:
+`distance` in cm, every 30 ms of simulated time, three rays over +-7 degrees,
+over objects lower than the sensor), `sonarServo` (a servo that turns the
+sonar, 90 = ahead), `imu` (an MPU6050: acceleration with gravity and the
+yaw rate on `gyroZ`). A line follower starts on the tape's centre line: on a
+loop centred at the origin, `y: -(h/2 - tape/2)`.
+
+With the mouse: drag an object to move it, shift+drag (or Q / E on the
+selected one) to turn it, drag empty space to orbit (3D) or pan (2D), right
+or ctrl+drag to pan in 3D, the wheel to zoom. **3D** / **2D** switch the
+view, **Reset** puts every robot back. A move goes back into the page's
+JSON block (the HTML tab shows it), so it is saved with the project; robots
+keep their start place, not where they drove to. Missing or wrong bindings
+are listed in the top right corner of the scene.
+
+`velxio.kit.objects` (live places, speeds and readings), `velxio.kit.scene`
+(the scene as written) and `velxio.kit.reset()` are there for a page that
+adds its own code around the kit.
+
+The parts a kit robot is made of:
+
+- **DC Gear Motor** (`dc-motor`, pins `M+`, `M-`): turns at the duty across
+  its pins, straight on a pin or behind a driver (the L293D); property `rpm`,
+  the no-load speed at full drive (200).
+- **IR Line Sensor** (`line-sensor`, pins `VCC`, `GND`, `DO`, `AO`): DO HIGH
+  over a dark surface (below `threshold`, 50 %), AO falling toward 0 V as the
+  surface gets lighter; its panel has the surface slider.
+
+The gallery example **Uno: Line Follower Robot (World kit)** puts them
+together: an L293D, two motors, two line sensors and an HC-SR04.
 
 ## A model from a file
 
@@ -91,9 +167,13 @@ Add `robot.glb` with **Files** (up to 24 MB per file).
 
 - `frontend/src/world/worldRuntime.ts`: the page side (`window.velxio`), the
   CSP and the srcdoc.
+- `frontend/src/world/worldKit.ts`: `velxio.kit`, the kit scenes.
 - `frontend/src/world/WorldHost.ts`: the Velxio side: frames, sensors,
   buttons, screens, touch, files.
 - `frontend/src/world/worldCatalog.ts`: what the World sees of the circuit.
 - `frontend/src/world/useWorldStore.ts`: the World of the project.
 - `frontend/src/world/starterWorld.html`: the starter World.
 - `frontend/src/components/world/WorldPanel.tsx`: the panel.
+- `frontend/src/simulation/parts/RobotParts.ts` and
+  `frontend/src/components/velxio-components/RobotPartElements.ts`: the DC
+  motor and the line sensor.

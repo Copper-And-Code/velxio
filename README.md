@@ -46,7 +46,7 @@ The firmware talks to the virtual devices at fixed addresses (`0x21000000` on th
 
 **Examples.** The Copper and Code Studio apps for each board (`scripts/sync-studio-examples.py`), in the gallery next to Velxio's.
 
-**3D World.** The **3D** button of the canvas header shows the project's `world.html` over the circuit: a three.js (or 2D) page in a sandboxed iframe that sees the circuit only through `window.velxio`: LEDs, servos, buttons, sensors, the board screens as live textures you can touch, and `.glb` models added as World files. It follows the public `world/1` API of velxio.dev; see [docs/wiki/world.md](docs/wiki/world.md).
+**3D World.** The **3D** button of the canvas header shows the project's `world.html` over the circuit: a three.js (or 2D) page in a sandboxed iframe that sees the circuit only through `window.velxio`: LEDs, servos, buttons, sensors, the board screens as live textures you can touch, and `.glb` models added as World files. It follows the public `world/1` API of velxio.dev, kit scenes included (`velxio.kit`: robots, line-following tracks, obstacles, ramps and an arm from a JSON block, with a DC motor and an IR line sensor among the parts); see [docs/wiki/world.md](docs/wiki/world.md).
 
 **Recording.** The **REC** button records the simulator panel (the canvas or the World, and the serial monitor) to an MP4/WebM video, with the tab's audio.
 

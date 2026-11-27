@@ -13,7 +13,8 @@
  *   touch     a panel board's touch controller, in panel pixels;
  *   asset     a World file's bytes.
  */
-import { getEsp32Bridge, getStm32H7Bridge, useSimulatorStore } from '../store/useSimulatorStore';
+import { getBoardSimulator, getEsp32Bridge, getStm32H7Bridge, useSimulatorStore } from '../store/useSimulatorStore';
+import { guestMillis } from '../simulation/parts/partUtils';
 import { dispatchSensorUpdate } from '../simulation/SensorUpdateRegistry';
 import { b64ToBuffer, useWorldStore } from './useWorldStore';
 import {
@@ -57,6 +58,8 @@ export class WorldHost {
   private t = 0;
   private lastTick = 0;
   private wasRunning = false;
+  /** The guest clock (ms) of the board the frames count on, at the last frame. */
+  private lastGuest: { id: string; ms: number } | null = null;
   private pressed = new Set<string>();
   private themeObserver: MutationObserver | null = null;
   private unsubStore: (() => void) | null = null;
@@ -166,6 +169,14 @@ export class WorldHost {
         reply({ name: a.name, mime: a.mime, buffer }, [buffer]);
         break;
       }
+      case 'kit/scene':
+        // The kit's scene after an edit with the mouse: into the page's JSON block.
+        if (typeof p.json === 'string') {
+          const html = useWorldStore.getState().html;
+          const next = replaceKitScene(html, p.json);
+          if (next !== null && next !== html) useWorldStore.getState().setHtml(next);
+        }
+        break;
       case 'assets':
         reply(
           useWorldStore.getState().assets.map((a) => ({
@@ -178,6 +189,29 @@ export class WorldHost {
       default:
         fail(`Unknown method ${msg.method}`);
     }
+  }
+
+  /**
+   * Seconds the boards ran since the last frame: the guest clock of the first
+   * running board that has one in this tab (an AVR's cycles, an RP2040's
+   * timer), so physics keeps step with the firmware whatever speed it is
+   * emulated at; the wall time for a board whose clock is elsewhere (QEMU,
+   * Renode). A jump (a new board, a reset) counts as one wall frame.
+   */
+  private simulatedDt(boards: { id: string; running: boolean }[], wall: number): number {
+    for (const b of boards) {
+      if (!b.running) continue;
+      const sim = getBoardSimulator(b.id);
+      const ms = sim ? guestMillis(sim as never) : null;
+      if (ms === null) continue;
+      const prev = this.lastGuest;
+      this.lastGuest = { id: b.id, ms };
+      if (!prev || prev.id !== b.id) return wall;
+      const d = (ms - prev.ms) / 1000;
+      return d >= 0 && d <= 0.25 ? d : wall;
+    }
+    this.lastGuest = null;
+    return wall;
   }
 
   private start(): void {
@@ -197,7 +231,7 @@ export class WorldHost {
       this.notify('reset', null);
     }
     this.wasRunning = running;
-    const dt = running ? wall : 0;
+    const dt = running ? this.simulatedDt(s.boards, wall) : 0;
     if (running) this.t += dt;
     const parts: Record<string, Record<string, number | boolean>> = {};
     for (const c of s.components) {
@@ -262,4 +296,16 @@ export class WorldHost {
     this.displayTimers.set(id, window.setInterval(grab, period));
     grab();
   }
+}
+
+/**
+ * The page with the content of its `<script type="application/json"
+ * id="velxio-scene">` block replaced by `json`; null when it has none.
+ */
+export function replaceKitScene(html: string, json: string): string | null {
+  const re = /(<script\b[^>]*\bid\s*=\s*["']velxio-scene["'][^>]*>)([\s\S]*?)(<\/script>)/i;
+  const m = re.exec(html);
+  if (!m) return null;
+  const body = '\n' + json.replace(/<\/script/gi, '<\\/script') + '\n';
+  return html.slice(0, m.index) + m[1] + body + m[3] + html.slice(m.index + m[0].length);
 }

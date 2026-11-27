@@ -12,9 +12,14 @@
  *                                       texture) as a blob: URL
  *   velxio.assets() -> Promise<[{name, mime, size}]>
  *
+ * and velxio.kit (worldKit.ts): `velxio.kit.start()` runs the scene of the
+ * page's `<script type="application/json" id="velxio-scene">` block.
+ *
  * Messages are { velxio: 'world/1', ... }: requests carry an id and get
  * { id, result } or { id, error } back; everything else is a notification.
  */
+
+import { worldKitJs } from './worldKit';
 
 export const WORLD_CHANNEL = 'world/1';
 
@@ -43,7 +48,7 @@ export const WORLD_CSP = [
 
 // Runs in the iframe, as a classic script before the page's own. Plain ES2017
 // so it runs as written, whatever the page does afterwards.
-export const WORLD_RUNTIME_JS = String.raw`(function () {
+const RUNTIME_SOURCE = String.raw`(function () {
   'use strict';
   var CHANNEL = 'world/1';
   var parent = window.parent;
@@ -212,6 +217,9 @@ export const WORLD_RUNTIME_JS = String.raw`(function () {
     },
     assets: function () { return call('assets', {}); }
   };
+  // velxio.kit: ready-made robot scenes (worldKit.ts).
+  /*__KIT__*/
+  velxio.kit = makeKit(velxio, function (method, params) { send({ method: method, params: params }); });
   Object.defineProperty(window, 'velxio', { value: Object.freeze(velxio), enumerable: true });
   // Say hello until the host answers: the page may start before the host
   // listens.
@@ -222,6 +230,8 @@ export const WORLD_RUNTIME_JS = String.raw`(function () {
     setTimeout(hello, 50);
   })();
 })();`;
+
+export const WORLD_RUNTIME_JS = RUNTIME_SOURCE.replace('/*__KIT__*/', () => worldKitJs(THREE_URL));
 
 /**
  * The iframe's srcdoc: the page with the CSP and the runtime in front of its

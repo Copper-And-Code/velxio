@@ -10,6 +10,7 @@ import './ChipParts';
 import './SensorParts';
 import './GpsParts';
 import './MotorDriverParts';
+import './RobotParts';
 import './LogicGateParts';
 import './ProtocolParts';
 import './CustomChipPart';

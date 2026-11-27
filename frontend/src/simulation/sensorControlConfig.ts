@@ -574,6 +574,27 @@ export const SENSOR_CONTROLS: Record<string, SensorControlDef> = {
     defaultValues: { soundLevel: 512 },
   },
 
+  // ── IR line sensor (TCRT5000 module) ────────────────────────────────────
+  // What the surface under it reflects: 0 black tape .. 100 a white mat. A
+  // World kit robot writes it from the floor under the sensor.
+  'line-sensor': {
+    title: 'IR Line Sensor',
+    controls: [
+      {
+        type: 'slider',
+        key: 'reflectance',
+        label: 'Surface',
+        min: 0,
+        max: 100,
+        step: 1,
+        unit: '%',
+        defaultValue: 100,
+        formatValue: (v: number) => (v < 50 ? `${v}% (dark)` : `${v}% (light)`),
+      },
+    ],
+    defaultValues: { reflectance: 100 },
+  },
+
   // ── Tilt Switch ───────────────────────────────────────────────────────────
   'tilt-switch': {
     title: 'Tilt Switch',

@@ -8494,6 +8494,130 @@ void loop() {
     ],
   },
   {
+    id: 'uno-line-follower-world',
+    title: 'Uno: Line Follower Robot (World kit)',
+    description:
+      'A two-wheel robot follows a black loop in a 3D World kit scene: two DC motors behind an L293D, two IR line sensors and an HC-SR04 that stops it before an obstacle. Open the World, press Run, then drag the box off the tape.',
+    category: 'robotics',
+    difficulty: 'intermediate',
+    boardFilter: 'arduino-uno',
+    code: `// Arduino Uno — Line follower robot, in a World kit scene
+// Motors : L293D  EN1 → 5 (PWM)  IN1 → 7  IN2 → 8   (left motor on OUT1/OUT2)
+//                 EN2 → 6 (PWM)  IN3 → 9  IN4 → 10  (right motor on OUT3/OUT4)
+// Line   : left DO → 2, right DO → 3 (HIGH over the black tape)
+// Sonar  : HC-SR04 TRIG → 11, ECHO → 12 (stops about 15 cm before an obstacle)
+// Open the World (3D button) and press Run: drag the box off the tape and the
+// robot goes on.
+
+#define EN_L 5
+#define IN1 7
+#define IN2 8
+#define EN_R 6
+#define IN3 9
+#define IN4 10
+#define LINE_L 2
+#define LINE_R 3
+#define TRIG 11
+#define ECHO 12
+
+const int CRUISE = 120, TURN = 170, BACK = -70;
+
+void drive(int left, int right) {   // -255 .. 255 per side
+  digitalWrite(IN1, left >= 0);  digitalWrite(IN2, left < 0);  analogWrite(EN_L, abs(left));
+  digitalWrite(IN3, right >= 0); digitalWrite(IN4, right < 0); analogWrite(EN_R, abs(right));
+}
+
+long distanceCm() {
+  digitalWrite(TRIG, LOW);  delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH); delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+  long us = pulseIn(ECHO, HIGH, 12000);   // ~2 m: a short wait keeps the robot steering
+  return us ? us / 58 : 400;
+}
+
+void setup() {
+  int outs[] = { EN_L, IN1, IN2, EN_R, IN3, IN4, TRIG };
+  for (int i = 0; i < 7; i++) pinMode(outs[i], OUTPUT);
+  pinMode(LINE_L, INPUT);
+  pinMode(LINE_R, INPUT);
+  pinMode(ECHO, INPUT);
+  Serial.begin(9600);
+  Serial.println("Line follower ready");
+}
+
+unsigned long lastPing = 0, lastLog = 0;
+long dist = 400;
+
+void loop() {
+  if (millis() - lastPing >= 60) {       // a ping every 60 ms
+    lastPing = millis();
+    dist = distanceCm();
+  }
+  bool left = digitalRead(LINE_L), right = digitalRead(LINE_R);
+  if (dist < 20)              drive(0, 0);          // something on the track
+  else if (left && !right)    drive(BACK, TURN);    // tape under the left sensor: turn left
+  else if (right && !left)    drive(TURN, BACK);    // under the right one: turn right
+  else                        drive(CRUISE, CRUISE);
+  if (millis() - lastLog >= 500) {      // a status line twice a second
+    lastLog = millis();
+    Serial.print("sonar "); Serial.print(dist);
+    Serial.print(" cm  line "); Serial.print(left); Serial.println(right);
+  }
+  delay(4);
+}`,
+    components: [
+      { type: 'velxio-motor-driver-l293d', id: 'lf-l293d', x: 430, y: 60, properties: {} },
+      { type: 'velxio-dc-motor', id: 'lf-motor-l', x: 600, y: 20, properties: { rpm: 200 } },
+      { type: 'velxio-dc-motor', id: 'lf-motor-r', x: 600, y: 110, properties: { rpm: 200 } },
+      { type: 'velxio-line-sensor', id: 'lf-line-l', x: 430, y: 220, properties: {} },
+      { type: 'velxio-line-sensor', id: 'lf-line-r', x: 500, y: 220, properties: {} },
+      { type: 'wokwi-hc-sr04', id: 'lf-sonar', x: 590, y: 230, properties: {} },
+    ],
+    wires: [
+      { id: 'lf-en1', start: { componentId: 'arduino-uno', pinName: '5' }, end: { componentId: 'lf-l293d', pinName: 'EN1' }, color: '#ff8800' },
+      { id: 'lf-in1', start: { componentId: 'arduino-uno', pinName: '7' }, end: { componentId: 'lf-l293d', pinName: 'IN1' }, color: '#22aa22' },
+      { id: 'lf-in2', start: { componentId: 'arduino-uno', pinName: '8' }, end: { componentId: 'lf-l293d', pinName: 'IN2' }, color: '#2299dd' },
+      { id: 'lf-en2', start: { componentId: 'arduino-uno', pinName: '6' }, end: { componentId: 'lf-l293d', pinName: 'EN2' }, color: '#ff8800' },
+      { id: 'lf-in3', start: { componentId: 'arduino-uno', pinName: '9' }, end: { componentId: 'lf-l293d', pinName: 'IN3' }, color: '#22aa22' },
+      { id: 'lf-in4', start: { componentId: 'arduino-uno', pinName: '10' }, end: { componentId: 'lf-l293d', pinName: 'IN4' }, color: '#2299dd' },
+      { id: 'lf-vcc1', start: { componentId: 'arduino-uno', pinName: '5V' }, end: { componentId: 'lf-l293d', pinName: 'VCC1' }, color: '#ff0000' },
+      { id: 'lf-vcc2', start: { componentId: 'arduino-uno', pinName: '5V' }, end: { componentId: 'lf-l293d', pinName: 'VCC2' }, color: '#ff0000' },
+      { id: 'lf-gnd', start: { componentId: 'arduino-uno', pinName: 'GND' }, end: { componentId: 'lf-l293d', pinName: 'GND.1' }, color: '#000000' },
+      { id: 'lf-ml1', start: { componentId: 'lf-l293d', pinName: 'OUT1' }, end: { componentId: 'lf-motor-l', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'lf-ml2', start: { componentId: 'lf-l293d', pinName: 'OUT2' }, end: { componentId: 'lf-motor-l', pinName: 'M-' }, color: '#555555' },
+      { id: 'lf-mr1', start: { componentId: 'lf-l293d', pinName: 'OUT3' }, end: { componentId: 'lf-motor-r', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'lf-mr2', start: { componentId: 'lf-l293d', pinName: 'OUT4' }, end: { componentId: 'lf-motor-r', pinName: 'M-' }, color: '#555555' },
+      { id: 'lf-ll-do', start: { componentId: 'arduino-uno', pinName: '2' }, end: { componentId: 'lf-line-l', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'lf-ll-v', start: { componentId: 'arduino-uno', pinName: '5V' }, end: { componentId: 'lf-line-l', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'lf-ll-g', start: { componentId: 'arduino-uno', pinName: 'GND' }, end: { componentId: 'lf-line-l', pinName: 'GND' }, color: '#000000' },
+      { id: 'lf-lr-do', start: { componentId: 'arduino-uno', pinName: '3' }, end: { componentId: 'lf-line-r', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'lf-lr-v', start: { componentId: 'arduino-uno', pinName: '5V' }, end: { componentId: 'lf-line-r', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'lf-lr-g', start: { componentId: 'arduino-uno', pinName: 'GND' }, end: { componentId: 'lf-line-r', pinName: 'GND' }, color: '#000000' },
+      { id: 'lf-us-v', start: { componentId: 'arduino-uno', pinName: '5V' }, end: { componentId: 'lf-sonar', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'lf-us-g', start: { componentId: 'arduino-uno', pinName: 'GND' }, end: { componentId: 'lf-sonar', pinName: 'GND' }, color: '#000000' },
+      { id: 'lf-us-t', start: { componentId: 'arduino-uno', pinName: '11' }, end: { componentId: 'lf-sonar', pinName: 'TRIG' }, color: '#00aaaa' },
+      { id: 'lf-us-e', start: { componentId: 'arduino-uno', pinName: '12' }, end: { componentId: 'lf-sonar', pinName: 'ECHO' }, color: '#aa00aa' },
+    ],
+    world: { open: true, html: `<!doctype html>
+<html><body>
+<script type="application/json" id="velxio-scene">
+{
+  "version": 1,
+  "view": "3d",
+  "floor": { "w": 2.4, "h": 1.6, "grid": true },
+  "objects": [
+    { "id": "track1", "type": "track", "shape": "loop", "x": 0, "y": 0, "w": 2.1, "h": 0.9, "tape": 0.022 },
+    { "id": "robot1", "type": "robot", "preset": "diff2", "x": -0.3, "y": -0.439, "rot": 0,
+      "bind": { "left": ["lf-motor-l"], "right": ["lf-motor-r"], "line": ["lf-line-l", "lf-line-r"], "sonar": "lf-sonar" } },
+    { "id": "box1", "type": "box", "x": 0.55, "y": -0.44, "w": 0.12, "d": 0.12, "h": 0.12, "label": "drag me" }
+  ]
+}
+</script>
+<script>velxio.kit.start();</script>
+</body></html>
+` },
+  },
+  {
     id: 'uno-photoresistor',
     title: 'Uno: Photoresistor Light Sensor',
     description:

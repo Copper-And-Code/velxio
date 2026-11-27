@@ -175,30 +175,43 @@ PartSimulationRegistry.register(L293D_ID, {
         level.set(name, GROUND_RAIL.test(hit.railName ?? '') ? 0 : 1);
         return;
       }
-      const duty = typeof pinManager.getPwmValue === 'function' ? Number(pinManager.getPwmValue(pin)) || 0 : 0;
-      level.set(name, duty > 0 ? duty : pinManager.getPinState(pin) ? 1 : 0);
+      // A chopped pin is its duty: the edges it also reports must not set
+      // the level to 1 or 0 one by one (the outputs flapped between full and
+      // off). A pin that is not chopped is its state.
+      const chopped = (): number | null => {
+        const d = typeof pinManager.getPwmValue === 'function' ? Number(pinManager.getPwmValue(pin)) || 0 : 0;
+        return d > 0 && d < 1 ? d : null;
+      };
+      level.set(name, chopped() ?? (pinManager.getPinState(pin) ? 1 : 0));
       unsubs.push(
         pinManager.onPinChange(pin, (_p: number, high: boolean) => {
-          level.set(name, high ? 1 : 0);
+          level.set(name, chopped() ?? (high ? 1 : 0));
           update();
         }),
       );
       if (typeof pinManager.onPwmChange === 'function') {
         unsubs.push(
           pinManager.onPwmChange(pin, (_p: number, d: number) => {
-            level.set(name, d);
+            level.set(name, d > 0 && d < 1 ? d : pinManager.getPinState(pin) ? 1 : 0);
             update();
           }),
         );
       }
     };
 
+    // Each output's duty as last published: a part that follows an output
+    // reads it with getPwmValue, so it is published whenever it changes,
+    // 0 and 1 included (a stop or full drive after a chopped stretch).
+    const published = new Map<string, number>();
     const update = () => {
       for (const o of L293D_OUTPUTS) {
         const duty = (level.get(o.enable) ?? 1) * (level.get(o.input) ?? 1);
         const pin = syntheticChipPin(componentId, o.out);
         pinManager.triggerPinChange(pin, duty > 0.01);
-        if (typeof pinManager.updatePwm === 'function' && duty > 0 && duty < 1) pinManager.updatePwm(pin, duty);
+        if (typeof pinManager.updatePwm === 'function' && published.get(o.out) !== duty) {
+          published.set(o.out, duty);
+          pinManager.updatePwm(pin, duty);
+        }
       }
     };
 

@@ -24,6 +24,7 @@ import './components/velxio-components/IC74HC595';
 import './components/velxio-components/LogicGateElements';
 import './components/velxio-components/LogicICElements';
 import './components/velxio-components/MotorDriverElements';
+import './components/velxio-components/RobotPartElements';
 import './components/velxio-components/OpAmpElements';
 import './components/velxio-components/PiPicoWElement';
 import './components/velxio-components/PowerElements';

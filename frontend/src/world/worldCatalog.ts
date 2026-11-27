@@ -90,6 +90,7 @@ export const PART_OUTPUTS: Record<string, string[]> = {
   'stepper-motor': ['angle'],
   'biaxial-stepper': ['angle'],
   buzzer: ['on'],
+  'dc-motor': ['drive', 'rpm'],
 };
 
 export const PRESS_PARTS = new Set(['pushbutton', 'pushbutton-6mm']);
@@ -181,6 +182,8 @@ export function readPartOutputs(type: string, el: unknown): Record<string, numbe
       return { angle: num(e.angle) };
     case 'buzzer':
       return { on: e.hasSignal === true };
+    case 'dc-motor':
+      return { drive: Math.max(-1, Math.min(1, num(e.drive))), rpm: num(e.rpm) };
     default:
       return null;
   }

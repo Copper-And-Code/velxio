@@ -27,6 +27,7 @@ import './components/velxio-components/DiodeElements';
 import './components/velxio-components/RelayElements';
 import './components/velxio-components/LogicICElements';
 import './components/velxio-components/MotorDriverElements';
+import './components/velxio-components/RobotPartElements';
 import './components/velxio-components/FlipFlopElements';
 import './components/velxio-components/RaspberryPi3Element';
 import './components/velxio-components/Bmp280Element';
