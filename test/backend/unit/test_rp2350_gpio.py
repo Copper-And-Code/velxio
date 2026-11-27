@@ -7,7 +7,11 @@ file; the lane turns them into `rp2350_gpio_dir`, `rp2350_gpio_change` and
 The first levels arrive before the machine has made its file (a line sensor
 on the tape at Run): they must be kept and written once the file is mapped,
 or the guest reads 0 until the level changes again, and a robot never sees
-the tape it starts on. Imports the real production module.
+the tape it starts on. The machine also gives the file its size before it
+clears the GPIO block and writes its magic: a lane that took the file on its
+size alone could write the inputs too early (wiped by the clear) and start a
+poll that found no block and gave up, leaving a run with no GPIO at all.
+Imports the real production module.
 """
 
 from __future__ import annotations
@@ -90,3 +94,41 @@ def test_poll_reports_direction_level_and_duty(tmp_path):
     assert ('rp2350_gpio_dir', {'pin': 10, 'dir': 0}) in events
     assert events.index(('rp2350_gpio_dir', {'pin': 10, 'dir': 1})) < events.index(('rp2350_gpio_dir', {'pin': 10, 'dir': 0}))
     assert not any(k == 'rp2350_pwm' and d['pin'] != 8 for k, d in events)
+
+
+def test_the_block_is_used_only_once_the_machine_has_filled_it(tmp_path):
+    events = []
+    mgr = rq.Rp2350Manager()
+    inst, f = _instance(tmp_path, events)   # the file has its size, and nothing in it yet
+    inst.panel_path = str(tmp_path / 'panel.fb')
+    mgr._instances['c'] = inst
+    mgr.gpio_input('c', 10, True)
+    inst.running = True
+    qemu = mmap.mmap(f.fileno(), OFF + rq._GPIO_SIZE)   # the machine's own mapping
+
+    async def run():
+        task = asyncio.create_task(mgr._poll_panel(inst))
+        await asyncio.sleep(0.08)
+        early = (inst.gpio_ok, struct.unpack_from('<I', qemu, OFF + 24)[0], len(inst.tasks))
+        # the machine clears the block, then writes its magic
+        qemu[OFF:OFF + rq._GPIO_SIZE] = bytes(rq._GPIO_SIZE)
+        struct.pack_into('<I', qemu, OFF, rq._GPIO_MAGIC)
+        await asyncio.sleep(0.08)
+        struct.pack_into('<%dI' % rq._GPIO_COUNT, qemu, OFF + 64, *([0xFFFFFFFF] * rq._GPIO_COUNT))
+        struct.pack_into('<4I', qemu, OFF + 8, 1 << 9, 0, 1 << 9, 0)
+        struct.pack_into('<I', qemu, OFF + 4, 1)
+        await asyncio.sleep(0.08)
+        inst.running = False
+        await asyncio.sleep(0.06)
+        for t in [task, *inst.tasks]:
+            t.cancel()
+        return early
+
+    early = asyncio.run(run())
+    assert early == (False, 0, 0)           # nothing written, no poll started, before the magic
+    assert inst.gpio_ok
+    assert struct.unpack_from('<I', qemu, OFF + 24)[0] == 1 << 10   # the input kept from before
+    assert struct.unpack_from('<I', qemu, OFF + 32)[0] == 1 << 10
+    assert ('rp2350_gpio_change', {'pin': 9, 'value': True}) in events
+    qemu.close()
+    f.close()

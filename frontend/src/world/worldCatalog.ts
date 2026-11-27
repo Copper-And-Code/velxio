@@ -183,7 +183,8 @@ export function readPartOutputs(type: string, el: unknown): Record<string, numbe
     case 'buzzer':
       return { on: e.hasSignal === true };
     case 'dc-motor':
-      return { drive: Math.max(-1, Math.min(1, num(e.drive))), rpm: num(e.rpm) };
+      // `speed` is the element's live speed; its `rpm` is the no-load property.
+      return { drive: Math.max(-1, Math.min(1, num(e.drive))), rpm: num(e.speed) };
     default:
       return null;
   }

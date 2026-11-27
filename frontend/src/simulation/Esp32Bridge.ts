@@ -442,6 +442,9 @@ export class Esp32Bridge {
     return getTabSessionId() + '::' + this.boardId;
   }
 
+  /** Input levels waiting for the socket to open, by pin (see sendPinEvent). */
+  private _pendingPinEvents = new Map<number, boolean>();
+
   connect(): void {
     // Force a clean reconnect. The old guard here was
     //   if (this.socket && readyState !== CLOSED) return;
@@ -469,6 +472,7 @@ export class Esp32Bridge {
       this._connected = false;
     }
 
+    this._pendingPinEvents.clear();
     const base = API_BASE();
     const wsProtocol = base.startsWith('https') ? 'wss:' : 'ws:';
     const sessionId = getTabSessionId();
@@ -500,6 +504,11 @@ export class Esp32Bridge {
           wifi_enabled: this.wifiEnabled,
         },
       });
+      // What the circuit drove while the socket was opening, after the start.
+      for (const [pin, state] of this._pendingPinEvents) {
+        this._send({ type: 'esp32_gpio_in', data: { pin, state: state ? 1 : 0 } });
+      }
+      this._pendingPinEvents.clear();
     };
 
     socket.onmessage = (event: MessageEvent) => {
@@ -870,6 +879,14 @@ export class Esp32Bridge {
   /** Drive a GPIO pin from an external source (e.g. connected Arduino) */
   sendPinEvent(gpioPin: number, state: boolean): void {
     if (this.ownsSensorPin(gpioPin)) return;
+    // While the socket of this run is still opening the level is kept (the
+    // last one per pin) and sent after start_esp32: a part writes its level
+    // once (a line sensor on the tape at Run), so one dropped here was lost
+    // for the whole run.
+    if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+      this._pendingPinEvents.set(gpioPin, state);
+      return;
+    }
     this._send({ type: 'esp32_gpio_in', data: { pin: gpioPin, state: state ? 1 : 0 } });
   }
 

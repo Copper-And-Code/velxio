@@ -201,6 +201,31 @@ export function setAdcVoltage(simulator: AnySimulator, pin: number, voltage: num
  * `{"type":"gpio_in","data":{"pin":-1,...}}` to the guest, and the gallery
  * example wired exactly that way never saw its button.
  */
+/**
+ * The level a part sees on a pin its board may chop, 0..1.
+ *
+ *  - a duty between 0 and 1: the duty. The pin also reports edges while PWM
+ *    drives it, and they must not set the level to 1 or 0 one by one;
+ *  - a duty of 1 or more: a steady HIGH, whatever the pin's state says. A
+ *    board whose PWM lives in hardware (the ESP32's LEDC, a Raspberry Pi)
+ *    leaves the pad's GPIO latch LOW while a channel drives it, so its
+ *    analogWrite(pin, 255) would otherwise read as 0;
+ *  - a duty of 0: the pin's state. It is what a pin reports when PWM is off
+ *    and digitalWrite drives it (an AVR at analogWrite 0 or 255).
+ */
+export function choppedPinLevel(
+  pinManager: {
+    getPinState: (pin: number) => boolean;
+    getPwmValue?: (pin: number) => number;
+  },
+  pin: number,
+): number {
+  const duty = typeof pinManager.getPwmValue === 'function' ? Number(pinManager.getPwmValue(pin)) || 0 : 0;
+  if (duty >= 1) return 1;
+  if (duty > 0) return duty;
+  return pinManager.getPinState(pin) ? 1 : 0;
+}
+
 export function firstBoardPin(
   getArduinoPin: (pinName: string) => number | null,
   names: readonly string[],

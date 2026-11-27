@@ -1406,6 +1406,8 @@ class Stm32H7BridgeShim {
   private bridge: Stm32H7Bridge;
   /** The RP2350 lane numbers its pads GP0-47, not port*16 + pin. */
   private readonly gpPins: boolean;
+  /** RP2350: the level the circuit drives on each pad (see setPinState). */
+  private circuitLevels = new Map<number, boolean>();
 
   constructor(bridge: Stm32H7Bridge, pm: PinManager, gpPins = false) {
     this.bridge = bridge;
@@ -1421,13 +1423,28 @@ class Stm32H7BridgeShim {
   /** Drive a GPIO input from the circuit; `pin` is linear (port*16 + pin). */
   setPinState(pin: number, state: boolean): void {
     if (pin < 0 || pin > (this.gpPins ? 47 : 127)) return; // rails and unmapped pads
-    if (this.pinManager.getOutputPins().has(pin)) return; // the firmware drives it
+    const driven = this.pinManager.getOutputPins().has(pin); // the firmware drives it
     if (this.gpPins) {
+      // The RP2350 machine keeps the circuit's level next to its own drive,
+      // and reads it once its firmware lets the pad go (an SD pin the boot
+      // used, then a Pin.IN of the app): a level written meanwhile must
+      // reach it, a part writes it once.
+      this.circuitLevels.set(pin, state);
       this.bridge.setGpioInputPin(pin, state);
-    } else {
+    } else if (!driven) {
       const name = stm32LinearToPinName(pin); // 'PA0'
       this.bridge.setGpioInput(name[1], pin % 16, state);
     }
+    if (driven) return; // what the parts see on the pad is the firmware's level
+    this.pinManager.triggerPinChange(pin, state, 'external');
+    this.onPinChangeWithTime?.(pin, state, performance.now());
+  }
+
+  /** RP2350: the firmware let pad `pin` go, so the level on it is the
+   *  circuit's again, for the parts and the scope as well. */
+  padReleased(pin: number): void {
+    const state = this.circuitLevels.get(pin);
+    if (state === undefined) return;
     this.pinManager.triggerPinChange(pin, state, 'external');
     this.onPinChangeWithTime?.(pin, state, performance.now());
   }
@@ -2613,6 +2630,7 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       // then a Pin.IN of the app).
       bridge.onGpioDir = (pin, dir) => {
         pinManagerMap.get(id)?.setPinDirection(pin, dir);
+        if (!dir) shim.padReleased(pin);
       };
       // The firmware's GPIO edges (backend ODR poll) reach the parts and the
       // netlist through the PinManager, on the linear pin. addGpioListener

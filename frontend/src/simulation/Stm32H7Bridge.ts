@@ -194,6 +194,9 @@ export class Stm32H7Bridge {
       : null;
   }
 
+  /** Input levels waiting for the socket to open, by pad (see _sendInput). */
+  private _pendingInputs = new Map<string, unknown>();
+
   private _disposeSession(): void {
     this._mpySession?.dispose();
     this._mpySession = null;
@@ -202,6 +205,7 @@ export class Stm32H7Bridge {
 
   connect(): void {
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) return;
+    this._pendingInputs.clear();
 
     // A relative base ('/api', behind a proxy on the page's own origin, as in
     // Codespaces) is made absolute on the page's host and scheme.
@@ -223,6 +227,9 @@ export class Stm32H7Bridge {
       const startData: Record<string, unknown> = { board: this.boardKind, ...this.startExtras };
       if (this.firmwarePath) startData.firmware_path = this.firmwarePath;
       this._send({ type: `${this.prefix}start`, data: startData });
+      // What the circuit drove while the socket was opening, after the start.
+      for (const payload of this._pendingInputs.values()) this._send(payload);
+      this._pendingInputs.clear();
     };
 
     socket.onmessage = (event: MessageEvent) => {
@@ -318,6 +325,7 @@ export class Stm32H7Bridge {
       this.socket = null;
     }
     this._connected = false;
+    this._pendingInputs.clear();
     this._disposeSession();
   }
 
@@ -360,7 +368,7 @@ export class Stm32H7Bridge {
     const p = port.toUpperCase();
     if (p.length !== 1 || p < 'A' || p > 'H') return;
     if (!Number.isInteger(pin) || pin < 0 || pin > 15) return;
-    this._send({
+    this._sendInput(`${p}${pin}`, {
       type: `${this.prefix}gpio_input`,
       data: { port: p, pin, value },
     });
@@ -369,7 +377,22 @@ export class Stm32H7Bridge {
   /** RP2350 lane: drive pad GPn from the circuit (null lets it go). */
   setGpioInputPin(pin: number, value: boolean | null): void {
     if (!Number.isInteger(pin) || pin < 0 || pin > 47) return;
-    this._send({ type: `${this.prefix}gpio_input`, data: { pin, value } });
+    this._sendInput(`GP${pin}`, { type: `${this.prefix}gpio_input`, data: { pin, value } });
+  }
+
+  /**
+   * A level the circuit drives on a pad. While the socket of this run is still
+   * opening the level is kept (the last one per pad) and sent after the start
+   * message: a part writes its level once (a line sensor on the tape at Run),
+   * so one dropped here was lost for the whole run. Without a socket there is
+   * no run to keep it for.
+   */
+  private _sendInput(pad: string, payload: unknown): void {
+    if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+      this._pendingInputs.set(pad, payload);
+    } else {
+      this._send(payload);
+    }
   }
 
   private static _decodeBase64Bytes(b64: string): Uint8Array | null {

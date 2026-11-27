@@ -13,6 +13,7 @@
  */
 
 import { PartSimulationRegistry } from './PartSimulationRegistry';
+import { choppedPinLevel } from './partUtils';
 import { useSimulatorStore } from '../../store/useSimulatorStore';
 import { traceDetailed } from '../PinTrace';
 import { registerChipLikePads } from '../customChips/chipLikePads';
@@ -175,28 +176,16 @@ PartSimulationRegistry.register(L293D_ID, {
         level.set(name, GROUND_RAIL.test(hit.railName ?? '') ? 0 : 1);
         return;
       }
-      // A chopped pin is its duty: the edges it also reports must not set
-      // the level to 1 or 0 one by one (the outputs flapped between full and
-      // off). A pin that is not chopped is its state.
-      const chopped = (): number | null => {
-        const d = typeof pinManager.getPwmValue === 'function' ? Number(pinManager.getPwmValue(pin)) || 0 : 0;
-        return d > 0 && d < 1 ? d : null;
+      // A chopped pin is its duty, a pin that is not is its state
+      // (choppedPinLevel): the outputs flapped between full and off when the
+      // PWM edges set the level one by one.
+      const read = () => {
+        level.set(name, choppedPinLevel(pinManager, pin));
+        update();
       };
-      level.set(name, chopped() ?? (pinManager.getPinState(pin) ? 1 : 0));
-      unsubs.push(
-        pinManager.onPinChange(pin, (_p: number, high: boolean) => {
-          level.set(name, chopped() ?? (high ? 1 : 0));
-          update();
-        }),
-      );
-      if (typeof pinManager.onPwmChange === 'function') {
-        unsubs.push(
-          pinManager.onPwmChange(pin, (_p: number, d: number) => {
-            level.set(name, d > 0 && d < 1 ? d : pinManager.getPinState(pin) ? 1 : 0);
-            update();
-          }),
-        );
-      }
+      level.set(name, choppedPinLevel(pinManager, pin));
+      unsubs.push(pinManager.onPinChange(pin, read));
+      if (typeof pinManager.onPwmChange === 'function') unsubs.push(pinManager.onPwmChange(pin, read));
     };
 
     // Each output's duty as last published: a part that follows an output

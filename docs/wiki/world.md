@@ -138,7 +138,14 @@ still to be checked):
   machine publishes its pads in the GPIO block of its panel file (levels,
   direction, PWM duty from the PWM slices) and reads the levels the circuit
   drives from it; the lane sends `rp2350_gpio_change`, `rp2350_gpio_dir` and
-  `rp2350_pwm`, and takes `rp2350_gpio_input`.
+  `rp2350_pwm`, and takes `rp2350_gpio_input`. `machine.reset()` and
+  `machine.WDT` reset the board through its watchdog: the firmware starts
+  again and every pad is let go, so the motors stop.
+
+A level the circuit drives reaches a backend board whenever it is written: one
+written while the WebSocket of the run is still opening is sent after the
+start message, and on the RP2350 one written while the firmware still drives
+the pad is the pad's level once it is let go.
 
 A line sensor pair sits 1.6 cm apart by default (`lineSpacing` on the robot),
 inside a 2.2 cm tape: on the tape both read black, and a robot that sees
@@ -153,8 +160,12 @@ selected one) to turn it, drag empty space to orbit (3D) or pan (2D), right
 or ctrl+drag to pan in 3D, the wheel to zoom. **3D** / **2D** switch the
 view, **Reset** puts every robot back. A move goes back into the page's
 JSON block (the HTML tab shows it), so it is saved with the project; robots
-keep their start place, not where they drove to. Missing or wrong bindings
-are listed in the top right corner of the scene.
+keep their start place, not where they drove to (Q / E turn the start
+heading by the same step). The block keeps the keys the kit does not know.
+An edit is written only over the scene the running page loaded: when the
+JSON in the HTML tab was changed since the last Run, or does not parse, the
+scene says so and leaves the page alone until the next Run. Missing or wrong
+bindings are listed in the top right corner of the scene.
 
 `velxio.kit.objects` (live places, speeds and readings), `velxio.kit.scene`
 (the scene as written) and `velxio.kit.reset()` are there for a page that
@@ -164,7 +175,11 @@ The parts a kit robot is made of:
 
 - **DC Gear Motor** (`dc-motor`, pins `M+`, `M-`): turns at the duty across
   its pins, straight on a pin or behind a driver (the L293D); property `rpm`,
-  the no-load speed at full drive (200).
+  the no-load speed at full drive (200). A terminal left open stops it. A
+  terminal on a transistor's collector or drain is switched by the base or
+  gate (the BJTs and MOSFETs of the picker: on with the pin HIGH for an NPN
+  or N-channel part, LOW for a PNP or P-channel one), so a motor between 5 V
+  and a 2N2222 runs at the PWM duty of the pin on the base.
 - **IR Line Sensor** (`line-sensor`, pins `VCC`, `GND`, `DO`, `AO`): DO HIGH
   over a dark surface (below `threshold`, 50 %), AO falling toward 0 V as the
   surface gets lighter; its panel has the surface slider.

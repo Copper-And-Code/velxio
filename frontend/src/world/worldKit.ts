@@ -66,17 +66,30 @@ function makeKit(velxio, send) {
   // ── scene ────────────────────────────────────────────────────────────────
   // What the page wrote, so a save keeps its JSON as it was apart from the edit.
   var written = { floorColor: false, rot: {} };
+  // The scene block as this page loaded it, then as last saved: the host
+  // writes an edit only over that text, so one made with the mouse cannot
+  // undo what was typed into the page since this Run.
+  var sceneBase = null;
+  // The block did not parse: the scene on show is not the page's, never save it.
+  var sceneBroken = false;
+  // three.js did not load: the 2D view stands in, the scene still says 3D.
+  var noThree = false;
+  var viewLoad = 0;
   function normalize(s) {
     s = s && typeof s === 'object' ? s : {};
     var f = s.floor || {};
     written.floorColor = typeof f.color === 'string';
-    var out = {
-      version: 1,
-      view: s.view === '2d' ? '2d' : '3d',
-      follow: typeof s.follow === 'string' ? s.follow : undefined,
-      floor: { w: Math.max(0.2, num(f.w, 2.4)), h: Math.max(0.2, num(f.h, 1.6)), grid: f.grid !== false, color: typeof f.color === 'string' ? f.color : '#f2efe8' },
-      objects: []
-    };
+    // A copy, so the keys the kit does not know stay in the JSON a save writes.
+    var out = JSON.parse(JSON.stringify(s));
+    out.version = 1;
+    out.view = s.view === '2d' ? '2d' : '3d';
+    if (typeof s.follow === 'string') out.follow = s.follow; else delete out.follow;
+    out.floor = f && typeof f === 'object' && !Array.isArray(f) ? JSON.parse(JSON.stringify(f)) : {};
+    out.floor.w = Math.max(0.2, num(f.w, 2.4));
+    out.floor.h = Math.max(0.2, num(f.h, 1.6));
+    out.floor.grid = f.grid !== false;
+    out.floor.color = typeof f.color === 'string' ? f.color : '#f2efe8';
+    out.objects = [];
     var seen = {};
     (Array.isArray(s.objects) ? s.objects : []).forEach(function (o, i) {
       if (!o || typeof o !== 'object') return;
@@ -620,13 +633,16 @@ function makeKit(velxio, send) {
   function rotateSelected(deg) {
     if (!selected) return;
     var o = selected;
-    o.rot = r1(wrap(o.rot + deg)); o.src.rot = o.rot;
+    // A robot that has driven is not at its start heading: turn both by the
+    // step, or its heading now would be saved as the one it starts with.
+    o.src.rot = r1(wrap(o.src.rot + deg)); o.rot = r1(wrap(o.rot + deg));
     if (o.type === 'robot') settle(o);
     if (o.type === 'track') buildRaster();
     if (view) view.dirty();
     save();
   }
   function save() {
+    if (sceneBroken) return;
     var out = JSON.parse(JSON.stringify(scene));
     if (!written.floorColor) delete out.floor.color;
     if (out.follow === undefined) delete out.follow;
@@ -634,7 +650,9 @@ function makeKit(velxio, send) {
       if (o.rot === 0 && !written.rot[o.id]) delete o.rot;
       else if (o.rot !== 0) written.rot[o.id] = true;
     });
-    send('kit/scene', { json: JSON.stringify(out, null, 2) });
+    var json = JSON.stringify(out, null, 2);
+    send('kit/scene', { json: json, base: sceneBase });
+    if (sceneBase !== null) sceneBase = json;
   }
 
   // ── page ─────────────────────────────────────────────────────────────────
@@ -658,7 +676,12 @@ function makeKit(velxio, send) {
     document.body.appendChild(hint);
     [['3D', '3d'], ['2D', '2d']].forEach(function (b) {
       var el = document.createElement('button'); el.textContent = b[0]; el.dataset.view = b[1];
-      el.onclick = function () { if (scene.view !== b[1]) { scene.view = b[1]; openView(); save(); } };
+      el.onclick = function () {
+        var shown = noThree ? '2d' : scene.view;
+        noThree = false;                     // asking for 3D again tries three.js again
+        if (scene.view !== b[1]) { scene.view = b[1]; save(); }
+        if (shown !== b[1]) openView();
+      };
       bar.appendChild(el);
     });
     var rs = document.createElement('button'); rs.textContent = 'Reset'; rs.onclick = resetWorld; bar.appendChild(rs);
@@ -713,15 +736,17 @@ function makeKit(velxio, send) {
 
   function openView() {
     if (view) { view.destroy(); view = null; }
-    Array.prototype.forEach.call(bar.querySelectorAll('button[data-view]'), function (b) { b.className = b.dataset.view === scene.view ? 'on' : ''; });
-    if (scene.view === '3d') {
+    var kind = noThree ? '2d' : scene.view, load = ++viewLoad;
+    Array.prototype.forEach.call(bar.querySelectorAll('button[data-view]'), function (b) { b.className = b.dataset.view === kind ? 'on' : ''; });
+    if (kind === '3d') {
       import(THREE_URL).then(function (THREE) {
-        if (scene.view !== '3d') return;
+        if (load !== viewLoad) return;       // another view was asked for meanwhile
         view = make3d(THREE);
         followChanged();
       }, function (e) {
+        if (load !== viewLoad) return;
         warn('three.js did not load (' + (e && e.message) + '): showing the 2D view');
-        scene.view = '2d'; openView();
+        noThree = true; openView();          // not written into the scene: a save must not make it 2D for good
       });
     } else {
       view = make2d();
@@ -784,7 +809,9 @@ function makeKit(velxio, send) {
       need = true;
     }
     function scale() { return cam.base * cam.s; }
-    function track() { var o = followed(); if (o) { cam.x = o.x; cam.y = o.y; } }
+    // Not while its robot is dragged: the drag is measured on the floor under
+    // the pointer, and a camera that follows would add the offset every frame.
+    function track() { var o = followed(); if (o && o !== dragging) { cam.x = o.x; cam.y = o.y; } }
     function sx(x) { return root.clientWidth / 2 + (x - cam.x) * scale(); }
     function sy(y) { return root.clientHeight / 2 - (y - cam.y) * scale(); }
     function floorAt(cx, cy) {
@@ -1088,7 +1115,7 @@ function makeKit(velxio, send) {
         ch.position.y = o.z;
         ch.rotation.set(o.roll * DEG, 0, o.pitch * DEG, 'YXZ');
         m.userData.wheels.forEach(function (w) {
-          var v = w.userData.side > 0 ? o.vl : o.vr;
+          var v = w.userData.side > 0 ? o.vr : o.vl;          // +z is the robot's right
           w.userData.spin = (w.userData.spin || 0) + (v / o.p.r) * (1 / 60);
           w.rotation.y = -w.userData.spin;
         });
@@ -1133,7 +1160,8 @@ function makeKit(velxio, send) {
     }
     function aim() {
       var fo = followed();
-      if (fo) { orbit.tx = fo.x; orbit.ty = fo.y; orbit.theta = fo.rot + 180 + orbit.off; }   // behind it
+      // behind it; held still while it is dragged (see the 2D view's track())
+      if (fo && fo !== dragging) { orbit.tx = fo.x; orbit.ty = fo.y; orbit.theta = fo.rot + 180 + orbit.off; }
       var th = orbit.theta * DEG, ph = orbit.phi * DEG;
       cam.position.set(orbit.tx + orbit.dist * Math.sin(ph) * Math.cos(th), orbit.dist * Math.cos(ph), -orbit.ty - orbit.dist * Math.sin(ph) * Math.sin(th));
       cam.lookAt(orbit.tx, fo ? 0.07 : 0, -orbit.ty);
@@ -1213,8 +1241,12 @@ function makeKit(velxio, send) {
       var el = document.getElementById('velxio-scene');
       if (!el) warn('no <script type="application/json" id="velxio-scene"> in the page');
       else {
-        try { s = JSON.parse(el.textContent || '{}'); }
-        catch (e) { warn('the velxio-scene JSON does not parse: ' + e.message); }
+        sceneBase = el.textContent || '';
+        try { s = JSON.parse(sceneBase || '{}'); }
+        catch (e) {
+          sceneBroken = true;
+          warn('the velxio-scene JSON does not parse: ' + e.message + '\nEdits made here are not saved until it does.');
+        }
       }
     }
     scene = normalize(s);
@@ -1228,6 +1260,9 @@ function makeKit(velxio, send) {
       });
       velxio.on('parts', setInfo);
       velxio.on('reset', resetWorld);
+      velxio.on('kit/stale', function () {
+        warn('The scene in the page was edited after this Run: edits made here with the mouse are not saved. Run again to pick it up.');
+      });
       velxio.on('theme', function (t) { info.theme = t; if (view) view.dirty(); });
       velxio.on('visibility', function (v) { visible = !!v; if (visible && view) view.dirty(); });
       velxio.onFrame(onFrame);

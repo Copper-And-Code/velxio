@@ -4,7 +4,10 @@
  *   velxio-dc-motor     a brushed gear motor (TT style). Pins M+ and M-; the
  *                       simulation (simulation/parts/RobotParts.ts) sets
  *                       `drive` (-1..1, the duty across the winding) and
- *                       `rpm`, and the hub turns with it.
+ *                       `speed` (rpm now), and the hub turns with it. `rpm`
+ *                       is the part's property, its no-load speed: the two
+ *                       must not share a name, or a property sync (a
+ *                       rotation, the dialog) overwrites the live speed.
  *   velxio-line-sensor  an IR reflectance module (TCRT5000 style). Pins VCC,
  *                       GND, DO (HIGH over a dark surface) and AO; the World
  *                       or the sensor panel sets `reflectance` (0 black ..
@@ -29,7 +32,8 @@ class DcMotorElement extends HTMLElement {
     { name: 'M-', x: 4, y: 40, number: 2, signals: [] },
   ];
   private _drive = 0;
-  private _rpm = 0;
+  private _rpm = 200;
+  private _speed = 0;
   private angle = 0;
   private raf = 0;
   private last = 0;
@@ -64,8 +68,12 @@ class DcMotorElement extends HTMLElement {
     if (this.label) this.label.textContent = this._drive ? `${Math.round(this._drive * 100)}%` : '';
     if (this._drive && !this.raf && this.isConnected) this.spin();
   }
+  /** The no-load speed (the `rpm` property). */
   get rpm(): number { return this._rpm; }
-  set rpm(v: number) { this._rpm = Number(v) || 0; }
+  set rpm(v: number) { this._rpm = Number(v) > 0 ? Number(v) : 200; }
+  /** The speed now, in rpm, signed. */
+  get speed(): number { return this._speed; }
+  set speed(v: number) { this._speed = Number(v) || 0; }
 
   disconnectedCallback() {
     if (this.raf) cancelAnimationFrame(this.raf);
@@ -78,7 +86,7 @@ class DcMotorElement extends HTMLElement {
       const dt = Math.min(0.1, (now - this.last) / 1000);
       this.last = now;
       // shown at a fifth of the real speed, so the turning reads as turning
-      this.angle = (this.angle + (this._rpm / 60) * 360 * dt * 0.2) % 360;
+      this.angle = (this.angle + (this._speed / 60) * 360 * dt * 0.2) % 360;
       this.hub?.setAttribute('transform', `rotate(${this.angle.toFixed(1)})`);
       this.raf = this._drive ? requestAnimationFrame(step) : 0;
     };

@@ -70,6 +70,7 @@ _GPIO_SIZE = 256
 _GPIO_MAGIC = 0x4f495856
 _GPIO_COUNT = 48
 _GPIO_POLL_S = 0.005
+_GPIO_MAGIC_TRIES = 200       # x 10 ms: how long the machine may take to fill the block
 
 EventCallback = Callable[[str, dict], Awaitable[None]]
 
@@ -207,8 +208,17 @@ class Rp2350Manager:
             return
         with open(inst.panel_path, 'r+b') as f:
             size = os.fstat(f.fileno()).st_size
-            inst.gpio_ok = size >= _GPIO_OFFSET + _GPIO_SIZE
-            inst.panel = mmap.mmap(f.fileno(), _GPIO_OFFSET + _GPIO_SIZE if inst.gpio_ok else _PANEL_SIZE)
+            has_gpio = size >= _GPIO_OFFSET + _GPIO_SIZE
+            inst.panel = mmap.mmap(f.fileno(), _GPIO_OFFSET + _GPIO_SIZE if has_gpio else _PANEL_SIZE)
+        if has_gpio:
+            # The machine gives the file its size first, then clears the GPIO
+            # block and writes its magic: an input written before that would
+            # be wiped, and a poll started before it would find no block.
+            for _ in range(_GPIO_MAGIC_TRIES):
+                if struct.unpack_from('<I', inst.panel, _GPIO_OFFSET)[0] == _GPIO_MAGIC:
+                    inst.gpio_ok = True
+                    break
+                await asyncio.sleep(0.01)
         if inst.gpio_ok:
             for pin, value in list(inst.inputs.items()):
                 self._write_input(inst, pin, value)
@@ -232,8 +242,6 @@ class Rp2350Manager:
     async def _poll_gpio(self, inst: Rp2350Instance) -> None:
         """Pad levels and PWM duties the firmware drives, as events."""
         assert inst.panel is not None
-        if struct.unpack_from('<I', inst.panel, _GPIO_OFFSET)[0] != _GPIO_MAGIC:
-            return
         last_serial = None
         levels = [None] * _GPIO_COUNT
         last_oe = 0

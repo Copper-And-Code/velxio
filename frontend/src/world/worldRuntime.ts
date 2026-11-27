@@ -156,6 +156,7 @@ const RUNTIME_SOURCE = String.raw`(function () {
         break;
       }
       case 'reset': emit('reset'); break;
+      case 'kit/stale': emit('kit/stale'); break;
       case 'theme': if (info) info.theme = p; emit('theme', p); break;
       case 'visibility': emit('visibility', p); break;
       case 'parts': info = p; emit('parts', p); break;

@@ -418,6 +418,24 @@ function walk(
   return { arduinoPin: null, ...flags(activeSeen, reactiveSeen) };
 }
 
+/**
+ * The component pins on the node of (fromId, fromPin): every pin joined to it
+ * by wires alone, itself included. For a part that has to know what sits on
+ * its terminal (a motor asking whether a transistor switches it), which the
+ * pin a trace ends on does not say.
+ */
+export function nodePins(
+  state: TraceState,
+  fromId: string,
+  fromPin: string,
+): Array<{ componentId: string; pinName: string; metadataId: string | undefined }> {
+  return collectNode(state, fromId, fromPin, new Map(), 0, undefined, true).pins.map((p) => ({
+    componentId: p.componentId,
+    pinName: p.pinName,
+    metadataId: p.comp?.metadataId,
+  }));
+}
+
 /** Every pin joined to (fromId, fromPin) without crossing a component. */
 interface NodeInfo {
   /** Component pins on the node, with their component when it is one. */

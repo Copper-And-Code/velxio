@@ -173,8 +173,14 @@ export class WorldHost {
       }
       case 'kit/scene':
         // The kit's scene after an edit with the mouse: into the page's JSON block.
+        // Only over the scene the page loaded (`base`): one typed into the
+        // page since this Run is newer than the page's, and is left alone.
         if (typeof p.json === 'string') {
           const html = useWorldStore.getState().html;
+          if (typeof p.base === 'string' && !sameKitScene(kitSceneText(html), p.base)) {
+            this.notify('kit/stale', null);
+            break;
+          }
           const next = replaceKitScene(html, p.json);
           if (next !== null && next !== html) useWorldStore.getState().setHtml(next);
         }
@@ -309,8 +315,31 @@ export class WorldHost {
  * The page with the content of its `<script type="application/json"
  * id="velxio-scene">` block replaced by `json`; null when it has none.
  */
+const KIT_SCENE_RE = /(<script\b[^>]*\bid\s*=\s*["']velxio-scene["'][^>]*>)([\s\S]*?)(<\/script>)/i;
+
+/** The text of the page's velxio-scene block; null when it has none. */
+export function kitSceneText(html: string): string | null {
+  const m = KIT_SCENE_RE.exec(html);
+  return m ? m[2] : null;
+}
+
+/**
+ * Whether two scene texts say the same scene: the JSON they hold, not its
+ * spelling (the block keeps `</script` escaped, the kit sends it plain). A
+ * text that does not parse is the same as nothing but itself.
+ */
+export function sameKitScene(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.trim() === b.trim()) return true;
+  try {
+    return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
+  } catch {
+    return false;
+  }
+}
+
 export function replaceKitScene(html: string, json: string): string | null {
-  const re = /(<script\b[^>]*\bid\s*=\s*["']velxio-scene["'][^>]*>)([\s\S]*?)(<\/script>)/i;
+  const re = KIT_SCENE_RE;
   const m = re.exec(html);
   if (!m) return null;
   const body = '\n' + json.replace(/<\/script/gi, '<\\/script') + '\n';
