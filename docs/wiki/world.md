@@ -118,8 +118,23 @@ first input, `reflectance` 0..100 on the `line-sensor`), `sonar` (an HC-SR04:
 `distance` in cm, every 30 ms of simulated time, three rays over +-7 degrees,
 over objects lower than the sensor), `sonarServo` (a servo that turns the
 sonar, 90 = ahead), `imu` (an MPU6050: acceleration with gravity and the
-yaw rate on `gyroZ`). A line follower starts on the tape's centre line: on a
-loop centred at the origin, `y: -(h/2 - tape/2)`.
+yaw rate on `gyroZ`), `display` (this fork: a board with a screen, or a
+part with one, that rides on the robot; see below). A line follower starts on
+the tape's centre line: on a loop centred at the origin, `y: -(h/2 - tape/2)`.
+
+**A board on the robot.** `"display": "esp32-4848s040"` (a board id) mounts
+that board's screen on the robot, at its real size (the 4" panels 8.6 cm, the
+7" one 16.5 cm), on a post at the back, facing behind the robot and leaning
+back by the robot's `displayTilt` (degrees from upright, 50 by default). It
+shows the live picture and takes touches, in 3D and in 2D (where it is drawn on
+top of the robot, its top toward the nose), so the app running on the board
+is the robot's dashboard. The board's own GPIOs drive the robot: on the
+ESP32-4848S040 the canvas has pads for IO1, IO2, IO40 and IO41 (which of them
+the real board's connectors break out is still to be checked).
+
+**Follow.** The **Follow** button, or `"follow": "<robot id>"` at the top of
+the scene, puts the camera close behind that robot and keeps it there (drag to
+look from another side); in 2D it centres and zooms on it.
 
 With the mouse: drag an object to move it, shift+drag (or Q / E on the
 selected one) to turn it, drag empty space to orbit (3D) or pan (2D), right
@@ -142,8 +157,14 @@ The parts a kit robot is made of:
   over a dark surface (below `threshold`, 50 %), AO falling toward 0 V as the
   surface gets lighter; its panel has the surface slider.
 
-The gallery example **Uno: Line Follower Robot (World kit)** puts them
-together: an L293D, two motors, two line sensors and an HC-SR04.
+The gallery examples put them together:
+
+- **Uno: Line Follower Robot (World kit)**: an L293D, two motors, two line
+  sensors and an HC-SR04 on an Arduino Uno;
+- **ESP32-4848S040: Line Robot with its screen (World kit)**: the panel board
+  rides on a four-wheel robot; a MicroPython app drives the motors (PWM on IO1
+  and IO2 into the L293D enables), reads the line sensors (IO40, IO41) and
+  shows them on an LVGL dashboard with a STOP / START button.
 
 ## A model from a file
 

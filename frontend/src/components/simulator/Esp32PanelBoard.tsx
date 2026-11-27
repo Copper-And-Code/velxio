@@ -21,8 +21,17 @@ export const ESP32_PANEL_FRAME_W = Math.round(PANEL_W * SCALE) + 2 * BEZEL;
 export const ESP32_PANEL_FRAME_H = Math.round(PANEL_H * SCALE) + 2 * BEZEL + 22;
 const TOUCH_THROTTLE_MS = 33;
 
-/** Pads PinOverlay reads: the UART0 header (the REPL, GPIO43 TX / GPIO44 RX), 3V3, GND. */
+/** Pads PinOverlay reads: four free GPIOs (IO1, IO2, IO40, IO41: PWM-capable,
+ *  for a robot's motors and sensors; which ones the real board's connectors
+ *  break out is still to be checked), then the UART0 header (the REPL, GPIO43
+ *  TX / GPIO44 RX), 3V3, GND. */
 export const ESP32_PANEL_PINS = [
+  ...['1', '2', '40', '41'].map((name, i) => ({
+    name,
+    x: 8,
+    y: ESP32_PANEL_FRAME_H - 128 + i * 14,
+    signals: [{ type: 'gpio', signal: 'IO' + name }],
+  })),
   { name: '3V3', x: 8, y: ESP32_PANEL_FRAME_H - 58, signals: [{ type: 'power', signal: 'VCC', voltage: 3.3 }] },
   { name: '43', x: 8, y: ESP32_PANEL_FRAME_H - 44, signals: [{ type: 'uart', signal: 'TX' }] },
   { name: '44', x: 8, y: ESP32_PANEL_FRAME_H - 30, signals: [{ type: 'uart', signal: 'RX' }] },

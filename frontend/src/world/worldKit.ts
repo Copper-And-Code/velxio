@@ -73,6 +73,7 @@ function makeKit(velxio, send) {
     var out = {
       version: 1,
       view: s.view === '2d' ? '2d' : '3d',
+      follow: typeof s.follow === 'string' ? s.follow : undefined,
       floor: { w: Math.max(0.2, num(f.w, 2.4)), h: Math.max(0.2, num(f.h, 1.6)), grid: f.grid !== false, color: typeof f.color === 'string' ? f.color : '#f2efe8' },
       objects: []
     };
@@ -103,6 +104,8 @@ function makeKit(velxio, send) {
       r.vl = 0; r.vr = 0; r.v = 0; r.w = 0; r.accel = 0;
       r.line = []; r.sonarCm = null; r.bumped = false;
       r.lastSonarT = -1; r.lastImuT = -1; r.sonarAngle = 0;
+      r.displayId = r.bind.display ? String(r.bind.display) : null;
+      r.displayTilt = clamp(num(o.displayTilt, 50), 0, 90);
     } else if (t === 'track') {
       r.shape = ['loop', 'oval', 'figure8', 'line'].indexOf(o.shape) >= 0 ? o.shape : 'loop';
       r.w = Math.max(0.05, num(o.w, 1.6)); r.h = Math.max(0.05, num(o.h, 0.9)); r.tape = clamp(num(o.tape, 0.022), 0.003, 0.2);
@@ -377,11 +380,41 @@ function makeKit(velxio, send) {
         need(o.bind.sonar, 'distance sensor', hasIn);
         need(o.bind.sonarServo, 'servo', hasOut('angle'));
         need(o.bind.imu, 'IMU', hasIn);
+        if (o.bind.display && !screenOf(o.bind.display)) warn(o.id + ': display "' + o.bind.display + '" is not a board or a part with a screen');
       } else if (o.type === 'arm') {
         ['base', 'shoulder', 'elbow', 'gripper'].forEach(function (k) { need(o.bind[k], k + ' servo', hasOut('angle')); });
       }
     });
   }
+
+  // ── screens a robot carries (bind.display) ────────────────────────────────
+  // The real panel's width in metres: a 4" 480x480 module, the 7" 1024x600.
+  var PANEL_WIDTH = { 'esp32-4848s040': 0.086, 'waveshare-rp2350-lcd4': 0.086, 'stm32h7-core-v13': 0.165 };
+  var screens = {};       // id -> { canvas, w, h, width, height (m), version }
+  function screenOf(id) {
+    var i, d = null, kind = null;
+    for (i = 0; i < (info.boards || []).length; i++) if (info.boards[i].id === id) { d = info.boards[i].display; kind = info.boards[i].kind; }
+    if (!d && partsById[id]) { d = partsById[id].display; kind = partsById[id].type; }
+    if (!d) return null;
+    var sc = screens[id];
+    if (!sc) {
+      var width = PANEL_WIDTH[kind] || 0.06;
+      sc = screens[id] = { canvas: velxio.display(id, { fps: 15 }), w: d.w, h: d.h, touch: !!d.touch,
+        width: width, height: (width * d.h) / d.w, version: 0 };
+      velxio.on('display:' + id, function () { sc.version++; if (view) view.dirty(); });
+    }
+    return sc;
+  }
+  /** Touch a screen at (u, v), 0..1 from its top left; pressed false lifts the finger. */
+  var touching = null;
+  function touchScreen(id, u, v, pressed) {
+    var sc = screens[id];
+    if (!sc || !sc.touch) return;
+    velxio.touch(id, Math.round(clamp(u, 0, 1) * (sc.w - 1)), Math.round(clamp(v, 0, 1) * (sc.h - 1)), pressed);
+    touching = pressed ? id : null;
+  }
+  /** Where a robot's screen sits on it, in its own frame, for the 2D view. */
+  function screen2d(o) { var sc = screenOf(o.displayId); return sc ? { sc: sc, cx: -o.p.L * 0.1 } : null; }
 
   // Only changed values reach the circuit.
   var lastWritten = {};
@@ -593,6 +626,7 @@ function makeKit(velxio, send) {
   function save() {
     var out = JSON.parse(JSON.stringify(scene));
     if (!written.floorColor) delete out.floor.color;
+    if (out.follow === undefined) delete out.follow;
     out.objects.forEach(function (o) {
       if (o.rot === 0 && !written.rot[o.id]) delete o.rot;
       else if (o.rot !== 0) written.rot[o.id] = true;
@@ -625,12 +659,32 @@ function makeKit(velxio, send) {
       bar.appendChild(el);
     });
     var rs = document.createElement('button'); rs.textContent = 'Reset'; rs.onclick = resetWorld; bar.appendChild(rs);
+    var fl = document.createElement('button'); fl.textContent = 'Follow'; fl.dataset.follow = '1';
+    fl.title = 'Follow a robot from close behind (the one with a screen first)';
+    fl.onclick = function () {
+      if (scene.follow) delete scene.follow;
+      else {
+        var rb = objs.filter(function (o) { return o.type === 'robot'; });
+        var withScreen = rb.filter(function (o) { return o.displayId; });
+        if (rb.length) scene.follow = (withScreen[0] || rb[0]).id;
+      }
+      followChanged(); save();
+    };
+    bar.appendChild(fl);
     window.addEventListener('keydown', function (e) {
       if (e.key === 'q' || e.key === 'Q') rotateSelected(15);
       else if (e.key === 'e' || e.key === 'E') rotateSelected(-15);
       else if (e.key === 'Escape') { selected = null; if (view) view.dirty(); }
     });
     showWarnings();
+  }
+  /** The robot the camera follows, or null. */
+  function followed() { var o = scene.follow && byId[scene.follow]; return o && o.type === 'robot' ? o : null; }
+  function followChanged() {
+    var b = bar && bar.querySelector('button[data-follow]');
+    if (b) b.className = followed() ? 'on' : '';
+    if (view && view.follow) view.follow(followed());
+    if (view) view.dirty();
   }
   function showWarnings() {
     warnBox.style.display = warnings.length ? 'block' : 'none';
@@ -661,20 +715,28 @@ function makeKit(velxio, send) {
       import(THREE_URL).then(function (THREE) {
         if (scene.view !== '3d') return;
         view = make3d(THREE);
+        followChanged();
       }, function (e) {
         warn('three.js did not load (' + (e && e.message) + '): showing the 2D view');
         scene.view = '2d'; openView();
       });
     } else {
       view = make2d();
+      followChanged();
     }
   }
 
   // Pointer handling shared by both views: toWorld(clientX, clientY) -> [x, y] on the floor or null.
-  function bindPointer(canvas, floorAt, onEmptyDrag, onWheel) {
+  function bindPointer(canvas, floorAt, onEmptyDrag, onWheel, screenAt) {
     var down = null;
     canvas.addEventListener('pointerdown', function (e) {
       canvas.setPointerCapture(e.pointerId);
+      var hit = e.button === 0 && !e.shiftKey && screenAt ? screenAt(e.clientX, e.clientY) : null;
+      if (hit && screens[hit.id] && screens[hit.id].touch) {
+        down = { screen: hit.id, last: [e.clientX, e.clientY] };
+        touchScreen(hit.id, hit.u, hit.v, true);
+        return;
+      }
       var p = floorAt(e.clientX, e.clientY);
       var o = p && e.button === 0 ? (p.length > 2 ? p[2] || pick(p[0], p[1]) : pick(p[0], p[1])) : null;
       down = { x: e.clientX, y: e.clientY, obj: o, button: e.button, last: [e.clientX, e.clientY] };
@@ -683,6 +745,11 @@ function makeKit(velxio, send) {
     });
     canvas.addEventListener('pointermove', function (e) {
       if (!down) return;
+      if (down.screen) {
+        var h = screenAt(e.clientX, e.clientY);
+        if (h && h.id === down.screen) touchScreen(h.id, h.u, h.v, true);
+        return;
+      }
       var dx = e.clientX - down.last[0], dy = e.clientY - down.last[1];
       down.last = [e.clientX, e.clientY];
       if (down.obj) {
@@ -690,7 +757,11 @@ function makeKit(velxio, send) {
         if (p) moveDrag(p[0], p[1], e.clientX - down.x);
       } else onEmptyDrag(dx, dy, down.button !== 0 || e.ctrlKey || e.metaKey);
     });
-    var up = function () { if (down && down.obj) endDrag(); down = null; };
+    var up = function () {
+      if (down && down.screen) touchScreen(down.screen, 0, 0, false);
+      else if (down && down.obj) endDrag();
+      down = null;
+    };
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
     canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -710,6 +781,7 @@ function makeKit(velxio, send) {
       need = true;
     }
     function scale() { return cam.base * cam.s; }
+    function track() { var o = followed(); if (o) { cam.x = o.x; cam.y = o.y; } }
     function sx(x) { return root.clientWidth / 2 + (x - cam.x) * scale(); }
     function sy(y) { return root.clientHeight / 2 - (y - cam.y) * scale(); }
     function floorAt(cx, cy) {
@@ -727,6 +799,7 @@ function makeKit(velxio, send) {
       if (!alive) return;
       if (!need || !visible) return;
       need = false;
+      track();
       var dpr = window.devicePixelRatio || 1, th = theme(), f = scene.floor, k = scale();
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.fillStyle = th.bg; g.fillRect(0, 0, root.clientWidth, root.clientHeight);
@@ -781,6 +854,17 @@ function makeKit(velxio, send) {
         g.beginPath(); g.arc(sx(w[0]), sy(w[1]), Math.max(2, 0.004 * k), 0, 2 * Math.PI);
         g.fillStyle = o.line[i] !== undefined && o.line[i] < 0.5 ? '#ff3b30' : '#7cfc00'; g.fill();
       });
+      var s2 = o.displayId && screen2d(o);
+      if (s2) {
+        var c = toWorld(o, s2.cx, 0);
+        g.save();
+        g.translate(sx(c[0]), sy(c[1]));
+        g.rotate(-(o.rot - 90) * DEG);
+        var sw = s2.sc.width * k, shh = s2.sc.height * k;
+        g.fillStyle = '#111'; g.fillRect(-sw / 2 - 3, -shh / 2 - 3, sw + 6, shh + 6);
+        g.drawImage(s2.sc.canvas, -sw / 2, -shh / 2, sw, shh);
+        g.restore();
+      }
       if (o.bind.sonar && o.sonarCm !== null) {
         var nose = toWorld(o, p.L / 2, 0), a = o.rot + o.sonarAngle, d = o.sonarCm / 100;
         g.strokeStyle = 'rgba(0,200,255,.6)'; g.setLineDash([4, 3]);
@@ -798,13 +882,26 @@ function makeKit(velxio, send) {
       g.strokeStyle = '#ddd'; g.stroke();
     }
     function frame() { if (!raf && alive) raf = requestAnimationFrame(draw); }
+    function screenAt2d(cx, cy) {
+      var w = floorAt(cx, cy);
+      for (var i = objs.length - 1; i >= 0; i--) {
+        var o = objs[i], s2 = o.type === 'robot' && o.displayId && screen2d(o);
+        if (!s2) continue;
+        var l = toLocal(o, w[0], w[1]);
+        // image x runs to the robot's right (-y), image y from its nose (+x) back
+        var u = 0.5 - l[1] / s2.sc.width, v = 0.5 - (l[0] - s2.cx) / s2.sc.height;
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) return { id: o.displayId, u: u, v: v };
+      }
+      return null;
+    }
     bindPointer(cv, floorAt, function (dx, dy) { cam.x -= dx / scale(); cam.y += dy / scale(); need = true; frame(); },
-      function (d) { cam.s = clamp(cam.s * (d > 0 ? 0.9 : 1.1), 0.3, 8); need = true; frame(); });
+      function (d) { cam.s = clamp(cam.s * (d > 0 ? 0.9 : 1.1), 0.3, 8); need = true; frame(); }, screenAt2d);
     var onResize = function () { fit(); frame(); };
     window.addEventListener('resize', onResize);
     fit(); frame();
     return {
       dirty: function () { need = true; frame(); },
+      follow: function (o) { if (o) cam.s = Math.max(cam.s, 3); else { cam.s = 1; cam.x = cam.y = 0; } need = true; frame(); },
       destroy: function () { alive = false; window.removeEventListener('resize', onResize); cv.remove(); }
     };
   }
@@ -834,7 +931,7 @@ function makeKit(velxio, send) {
     root.appendChild(renderer.domElement);
     var sc = new THREE.Scene();
     var cam = new THREE.PerspectiveCamera(45, 1, 0.01, 60);
-    var orbit = { theta: -90, phi: 52, dist: 0, tx: 0, ty: 0 };
+    var orbit = { theta: -90, phi: 52, dist: 0, tx: 0, ty: 0, off: 0 };
     var f = scene.floor;
     orbit.dist = Math.max(f.w, f.h) * 1.25;
     sc.add(new THREE.HemisphereLight(0xffffff, 0x444455, 0.9));
@@ -922,6 +1019,27 @@ function makeKit(velxio, send) {
         }
       }
       grp.userData.wheels = wheels;
+      var sc = o.displayId && screenOf(o.displayId);
+      if (sc) {
+        var mount = new THREE.Group();
+        mount.position.set(-p.L * 0.3, clear + 0.04, 0);
+        var post = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.03, 0.03), mat('#2a2f36'));
+        post.position.y = 0.015; mount.add(post);
+        var pivot = new THREE.Group(); pivot.position.y = 0.03;
+        pivot.rotation.z = -o.displayTilt * DEG;        // leans back, toward the nose
+        mount.add(pivot);
+        var bez = new THREE.Mesh(new THREE.BoxGeometry(0.006, sc.height + 0.012, sc.width + 0.012), mat('#111'));
+        bez.position.set(0.004, sc.height / 2 + 0.004, 0); bez.castShadow = true; pivot.add(bez);
+        var tex = new THREE.CanvasTexture(sc.canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        var glass = new THREE.Mesh(new THREE.PlaneGeometry(sc.width, sc.height), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+        glass.rotation.y = -Math.PI / 2;               // faces behind the robot (-x)
+        glass.position.set(0, sc.height / 2 + 0.004, 0);
+        glass.userData.screenOf = o.displayId;
+        pivot.add(glass);
+        chassis.add(mount);
+        grp.userData.screen = { tex: tex, sc: sc, version: -1 };
+      }
       var ids = asList(o.bind.line), n = ids.length, spacing = n === 2 ? 0.03 : 0.016;
       grp.userData.leds = ids.map(function (id, i) {
         var led = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.004, 0.008), new THREE.MeshBasicMaterial({ color: 0x7cfc00 }));
@@ -974,6 +1092,8 @@ function makeKit(velxio, send) {
         m.userData.leds.forEach(function (led, i) {
           led.material.color.set(o.line[i] !== undefined && o.line[i] < 0.5 ? 0xff3b30 : 0x7cfc00);
         });
+        var su = m.userData.screen;
+        if (su && su.version !== su.sc.version) { su.tex.needsUpdate = true; su.version = su.sc.version; }
         if (m.userData.head) {
           m.userData.head.rotation.y = o.sonarAngle * DEG;
           var d = o.sonarCm !== null ? o.sonarCm / 100 : 0;
@@ -1003,9 +1123,11 @@ function makeKit(velxio, send) {
       if (sel) { selBox.setFromObject(sel); selBox.visible = true; } else selBox.visible = false;
     }
     function aim() {
+      var fo = followed();
+      if (fo) { orbit.tx = fo.x; orbit.ty = fo.y; orbit.theta = fo.rot + 180 + orbit.off; }   // behind it
       var th = orbit.theta * DEG, ph = orbit.phi * DEG;
       cam.position.set(orbit.tx + orbit.dist * Math.sin(ph) * Math.cos(th), orbit.dist * Math.cos(ph), -orbit.ty - orbit.dist * Math.sin(ph) * Math.sin(th));
-      cam.lookAt(orbit.tx, 0, -orbit.ty);
+      cam.lookAt(orbit.tx, fo ? 0.07 : 0, -orbit.ty);
     }
     var ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitV = new THREE.Vector3();
     function floorAt(cx, cy) {
@@ -1037,6 +1159,13 @@ function makeKit(velxio, send) {
       var w = root.clientWidth, h = root.clientHeight;
       renderer.setSize(w, h, false); cam.aspect = w / Math.max(1, h); cam.updateProjectionMatrix(); need = true; frame();
     }
+    function screenAt3d(cx, cy) {
+      var r = renderer.domElement.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), cam);
+      var hits = ray.intersectObjects(Object.keys(meshes).map(function (k) { return meshes[k]; }), true);
+      if (!hits.length || !hits[0].object.userData.screenOf || !hits[0].uv) return null;
+      return { id: hits[0].object.userData.screenOf, u: hits[0].uv.x, v: 1 - hits[0].uv.y };
+    }
     bindPointer(renderer.domElement, floorAt, function (dx, dy, pan) {
       if (pan) {
         // the camera looks along (-cos th, -sin th) on the floor; its right is (-sin th, cos th)
@@ -1044,13 +1173,19 @@ function makeKit(velxio, send) {
         orbit.tx += (sn * dx - c * dy) * k;
         orbit.ty += (-c * dx - sn * dy) * k;
       } else {
-        orbit.theta -= dx * 0.4; orbit.phi = clamp(orbit.phi - dy * 0.3, 5, 88);
+        if (followed()) orbit.off -= dx * 0.4; else orbit.theta -= dx * 0.4;
+        orbit.phi = clamp(orbit.phi - dy * 0.3, 5, 88);
       }
       need = true; frame();
-    }, function (d) { orbit.dist = clamp(orbit.dist * (d > 0 ? 1.1 : 0.9), 0.2, 20); need = true; frame(); });
+    }, function (d) { orbit.dist = clamp(orbit.dist * (d > 0 ? 1.1 : 0.9), 0.2, 20); need = true; frame(); }, screenAt3d);
     window.addEventListener('resize', resize);
     resize();
     return {
+      follow: function (o) {
+        if (o) { orbit.dist = 0.42; orbit.off = 0; orbit.phi = 58; }
+        else { var f = scene.floor; orbit.dist = Math.max(f.w, f.h) * 1.25; orbit.tx = orbit.ty = 0; orbit.theta = -90; orbit.phi = 52; }
+        need = true; frame();
+      },
       dirty: function () { need = true; frame(); },
       destroy: function () {
         alive = false; window.removeEventListener('resize', resize);

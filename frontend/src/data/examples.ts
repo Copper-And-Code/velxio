@@ -8618,6 +8618,199 @@ void loop() {
 ` },
   },
   {
+    id: 'esp32-4848s040-line-robot',
+    title: 'ESP32-4848S040: Line Robot with its screen (World kit)',
+    description:
+      'The ESP32-4848S040 and its 4" screen ride on a four-wheel robot in a World kit scene. A MicroPython app drives two DC motors through an L293D (PWM on IO1 and IO2), reads two IR line sensors (IO40, IO41) and shows them on an LVGL dashboard: touch STOP / START on the robot\'s screen in 3D.',
+    category: 'robotics',
+    difficulty: 'intermediate',
+    boardType: 'esp32-4848s040',
+    boardFilter: 'esp32-4848s040',
+    languageMode: 'micropython',
+    code: '',
+    files: [{ name: 'main.py', content: `# ESP32-4848S040 line robot: the board and its 4" screen ride on the robot.
+#
+# Wiring (the free GPIOs of the board):
+#   IO1  -> L293D EN1 (left motor speed, PWM)   left motor on OUT1/OUT2
+#   IO2  -> L293D EN2 (right motor speed, PWM)  right motor on OUT3/OUT4
+#   L293D IN1, IN3 on 3V3 and IN2, IN4 on GND: both motors turn forward only
+#   IO40 <- left line sensor DO, IO41 <- right line sensor DO (1 over the tape)
+#
+# Open the World (3D button) and press Run. The screen on the robot is this
+# app: touch STOP / START on it, in the 3D scene or on the canvas.
+import display_driver
+import lvgl as lv
+import time
+from machine import Pin, PWM
+
+CRUISE, TURN = 0.45, 0.65              # duty, 0..1
+
+left = PWM(Pin(1), freq=1000, duty_u16=0)
+right = PWM(Pin(2), freq=1000, duty_u16=0)
+line_l = Pin(40, Pin.IN)
+line_r = Pin(41, Pin.IN)
+state = {'run': True, 'l': None, 'r': None, 'ticks': 0, 't0': time.ticks_ms()}
+
+GREEN, RED, GREY = 0x2ecc71, 0xff3b30, 0x5a6270
+
+
+def font(size):
+    return getattr(lv, 'font_montserrat_%d' % size, None)
+
+
+scr = lv.obj()
+scr.set_style_bg_color(lv.color_hex(0x10151c), 0)
+scr.remove_flag(lv.obj.FLAG.SCROLLABLE)
+
+title = lv.label(scr)
+title.set_text('LINE ROBOT')
+title.set_style_text_color(lv.color_hex(0xffffff), 0)
+if font(28):
+    title.set_style_text_font(font(28), 0)
+title.align(lv.ALIGN.TOP_MID, 0, 24)
+
+
+def eye(x):
+    o = lv.obj(scr)
+    o.set_size(120, 120)
+    o.set_style_radius(60, 0)
+    o.set_style_border_width(6, 0)
+    o.set_style_border_color(lv.color_hex(0xffffff), 0)
+    o.set_style_bg_color(lv.color_hex(GREY), 0)
+    o.remove_flag(lv.obj.FLAG.SCROLLABLE)
+    o.align(lv.ALIGN.TOP_MID, x, 90)
+    return o
+
+
+eye_l, eye_r = eye(-90), eye(90)
+
+
+def bar(y, text):
+    lab = lv.label(scr)
+    lab.set_text(text)
+    lab.set_style_text_color(lv.color_hex(0xc9ccd3), 0)
+    lab.align(lv.ALIGN.TOP_LEFT, 40, y + 4)
+    b = lv.bar(scr)
+    b.set_size(300, 26)
+    b.set_range(0, 100)
+    b.align(lv.ALIGN.TOP_LEFT, 140, y)
+    return b
+
+
+bar_l, bar_r = bar(250, 'LEFT'), bar(295, 'RIGHT')
+
+rate = lv.label(scr)
+rate.set_style_text_color(lv.color_hex(0x8a93a3), 0)
+rate.align(lv.ALIGN.TOP_RIGHT, -16, 16)
+
+btn = lv.button(scr)
+btn.set_size(220, 80)
+btn.align(lv.ALIGN.BOTTOM_MID, 0, -30)
+btn_label = lv.label(btn)
+btn_label.center()
+if font(28):
+    btn_label.set_style_text_font(font(28), 0)
+
+
+def show_button():
+    btn_label.set_text('STOP' if state['run'] else 'START')
+    btn.set_style_bg_color(lv.color_hex(RED if state['run'] else GREEN), 0)
+
+
+def toggle(e):
+    state['run'] = not state['run']
+    show_button()
+
+
+btn.add_event_cb(toggle, lv.EVENT.CLICKED, None)
+show_button()
+
+
+def drive(dl, dr):
+    left.duty_u16(int(dl * 65535))
+    right.duty_u16(int(dr * 65535))
+    bar_l.set_value(int(dl * 100), lv.ANIM.OFF)
+    bar_r.set_value(int(dr * 100), lv.ANIM.OFF)
+
+
+def tick(t):
+    l, r = line_l.value(), line_r.value()
+    if not state['run']:
+        drive(0, 0)
+    elif l and not r:        # tape under the left sensor: turn left
+        drive(0, TURN)
+    elif r and not l:        # under the right one: turn right
+        drive(TURN, 0)
+    else:
+        drive(CRUISE, CRUISE)
+    if l != state['l']:
+        state['l'] = l
+        eye_l.set_style_bg_color(lv.color_hex(RED if l else GREEN), 0)
+    if r != state['r']:
+        state['r'] = r
+        eye_r.set_style_bg_color(lv.color_hex(RED if r else GREEN), 0)
+    state['ticks'] += 1
+    dt = time.ticks_diff(time.ticks_ms(), state['t0'])
+    if dt >= 2000:                       # how often the loop runs: steering needs ~20/s
+        hz = state['ticks'] * 1000 // dt
+        rate.set_text('%d Hz' % hz)
+        print('loop', hz, 'Hz')
+        state['ticks'], state['t0'] = 0, time.ticks_ms()
+
+
+lv.timer_create(tick, 10, None)
+lv.screen_load(scr)
+display_driver.start()
+print('line robot ready')
+` }],
+    components: [
+      { type: 'velxio-motor-driver-l293d', id: 'rb-l293d', x: 470, y: 60, properties: {} },
+      { type: 'velxio-dc-motor', id: 'rb-motor-l', x: 640, y: 20, properties: { rpm: 200 } },
+      { type: 'velxio-dc-motor', id: 'rb-motor-r', x: 640, y: 110, properties: { rpm: 200 } },
+      { type: 'velxio-line-sensor', id: 'rb-line-l', x: 470, y: 230, properties: {} },
+      { type: 'velxio-line-sensor', id: 'rb-line-r', x: 540, y: 230, properties: {} },
+    ],
+    wires: [
+      { id: 'rb-en1', start: { componentId: 'esp32-4848s040', pinName: '1' }, end: { componentId: 'rb-l293d', pinName: 'EN1' }, color: '#ff8800' },
+      { id: 'rb-en2', start: { componentId: 'esp32-4848s040', pinName: '2' }, end: { componentId: 'rb-l293d', pinName: 'EN2' }, color: '#ff8800' },
+      { id: 'rb-in1', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-l293d', pinName: 'IN1' }, color: '#ff0000' },
+      { id: 'rb-in2', start: { componentId: 'esp32-4848s040', pinName: 'GND' }, end: { componentId: 'rb-l293d', pinName: 'IN2' }, color: '#000000' },
+      { id: 'rb-in3', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-l293d', pinName: 'IN3' }, color: '#ff0000' },
+      { id: 'rb-in4', start: { componentId: 'esp32-4848s040', pinName: 'GND' }, end: { componentId: 'rb-l293d', pinName: 'IN4' }, color: '#000000' },
+      { id: 'rb-vcc1', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-l293d', pinName: 'VCC1' }, color: '#ff0000' },
+      { id: 'rb-vcc2', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-l293d', pinName: 'VCC2' }, color: '#ff0000' },
+      { id: 'rb-gnd', start: { componentId: 'esp32-4848s040', pinName: 'GND' }, end: { componentId: 'rb-l293d', pinName: 'GND.1' }, color: '#000000' },
+      { id: 'rb-ml1', start: { componentId: 'rb-l293d', pinName: 'OUT1' }, end: { componentId: 'rb-motor-l', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'rb-ml2', start: { componentId: 'rb-l293d', pinName: 'OUT2' }, end: { componentId: 'rb-motor-l', pinName: 'M-' }, color: '#555555' },
+      { id: 'rb-mr1', start: { componentId: 'rb-l293d', pinName: 'OUT3' }, end: { componentId: 'rb-motor-r', pinName: 'M+' }, color: '#aa44cc' },
+      { id: 'rb-mr2', start: { componentId: 'rb-l293d', pinName: 'OUT4' }, end: { componentId: 'rb-motor-r', pinName: 'M-' }, color: '#555555' },
+      { id: 'rb-ll-do', start: { componentId: 'esp32-4848s040', pinName: '40' }, end: { componentId: 'rb-line-l', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'rb-ll-v', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-line-l', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'rb-ll-g', start: { componentId: 'esp32-4848s040', pinName: 'GND' }, end: { componentId: 'rb-line-l', pinName: 'GND' }, color: '#000000' },
+      { id: 'rb-lr-do', start: { componentId: 'esp32-4848s040', pinName: '41' }, end: { componentId: 'rb-line-r', pinName: 'DO' }, color: '#ffcc00' },
+      { id: 'rb-lr-v', start: { componentId: 'esp32-4848s040', pinName: '3V3' }, end: { componentId: 'rb-line-r', pinName: 'VCC' }, color: '#ff0000' },
+      { id: 'rb-lr-g', start: { componentId: 'esp32-4848s040', pinName: 'GND' }, end: { componentId: 'rb-line-r', pinName: 'GND' }, color: '#000000' },
+    ],
+    world: { open: true, html: `<!doctype html>
+<html><body>
+<script type="application/json" id="velxio-scene">
+{
+  "version": 1,
+  "view": "3d",
+  "follow": "robot1",
+  "floor": { "w": 2.4, "h": 1.6, "grid": true },
+  "objects": [
+    { "id": "track1", "type": "track", "shape": "oval", "x": 0, "y": 0, "w": 2.1, "h": 1.1, "tape": 0.022 },
+    { "id": "robot1", "type": "robot", "preset": "diff4", "x": -0.3, "y": -0.539, "rot": 0,
+      "bind": { "left": ["rb-motor-l"], "right": ["rb-motor-r"], "line": ["rb-line-l", "rb-line-r"], "display": "esp32-4848s040" } }
+  ]
+}
+</script>
+<script>velxio.kit.start();</script>
+</body></html>
+` },
+  },
+  {
     id: 'uno-photoresistor',
     title: 'Uno: Photoresistor Light Sensor',
     description:
