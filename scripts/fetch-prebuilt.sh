@@ -52,11 +52,17 @@ while read -r kind url sha dest; do
             top=$(find "$TMP/x" -mindepth 1 -maxdepth 1 -type d | head -1)
             [[ -n $top ]] || die "no directory in $(basename "$url")"
             [[ -f $top/SOURCE.txt ]] && mv "$top/SOURCE.txt" "$top/SOURCE-$(basename "$top").txt"
-            cp -a "$top"/. "$ROOT/$dest/"
+            # File by file, through a rename: a worker that has the old
+            # libqemu mapped keeps its copy instead of crashing on a file
+            # rewritten under it.
+            for f in "$top"/*; do
+                cp -a "$f" "$ROOT/$dest/.$(basename "$f").new"
+                mv -f "$ROOT/$dest/.$(basename "$f").new" "$ROOT/$dest/$(basename "$f")"
+            done
             ;;
         file)
             mkdir -p "$(dirname "$ROOT/$dest")"
-            cp "$file" "$ROOT/$dest"
+            cp "$file" "$ROOT/$dest.new" && mv -f "$ROOT/$dest.new" "$ROOT/$dest"
             ;;
         *) die "unknown kind '$kind' in $LOCK" ;;
     esac
