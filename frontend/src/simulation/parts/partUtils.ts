@@ -64,15 +64,17 @@ export function getADC(avrSimulator: AnySimulator): any | null {
  *
  * Sources, in order:
  *  - `getGuestMicros()` — engines that carry their own virtual clock but no
- *    CPU cycle counter the host can read (the in-browser ESP32 engines).
+ *    CPU cycle counter the host can read (the in-browser ESP32 engines), and
+ *    a QEMU worker whose guest counts instructions (a run under -icount: it
+ *    tells the page what its clock reads, see RemoteGuestClock).
  *  - `getCurrentCycles()` + `getClockHz()` — AVR and RP2040.
  *
  * NOTE the cycle path is deliberately NOT reached through a "does this board
  * have cycles?" test: several parts use `getCurrentCycles() >= 0` to tell an
  * AVR from an ESP32 bridge, so that predicate must keep meaning what it does.
  *
- * Returns null for a backend-QEMU board, whose clock lives in another process;
- * callers fall back to wall time.
+ * Returns null for a backend board on host time (QEMU without -icount), whose
+ * clock is the wall clock while it runs; callers fall back to wall time.
  */
 export function guestMillis(simulator: AnySimulator): number | null {
   const sim = simulator as unknown as {

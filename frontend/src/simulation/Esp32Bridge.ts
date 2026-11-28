@@ -50,6 +50,7 @@ import { withHostClock } from './parts/hostClock';
 import type { LineSupport } from './line/LineHost';
 import { recordPartGap } from './line/requestLine';
 import { generateUUID } from '../utils/uuid';
+import { RemoteGuestClock } from './RemoteGuestClock';
 
 /**
  * Map any ESP32-family board kind to the 3 base QEMU machine types understood
@@ -445,6 +446,22 @@ export class Esp32Bridge {
   /** Input levels waiting for the socket to open, by pin (see sendPinEvent). */
   private _pendingPinEvents = new Map<number, boolean>();
 
+  /** The worker's guest clock, when it counts instructions (see getGuestMicros). */
+  private _guestClock = new RemoteGuestClock();
+
+  /**
+   * The guest's clock in microseconds, or -1 when the page's own clock is the
+   * one to use. A run under -icount (the ESP32-C3, a MicroPython run timing a
+   * sensor's pulses) counts instructions: its clock runs slower than the wall
+   * clock when the host cannot keep up, and the worker says what it reads
+   * (`guest_clock`). Any other run keeps host time and the worker says
+   * nothing. What reads this: a World scene's physics, the parts that step a
+   * signal in time, the circuit's captures (guestMillis, guestMsOf).
+   */
+  getGuestMicros(): number {
+    return this._guestClock.read();
+  }
+
   connect(): void {
     // Force a clean reconnect. The old guard here was
     //   if (this.socket && readyState !== CLOSED) return;
@@ -473,6 +490,7 @@ export class Esp32Bridge {
     }
 
     this._pendingPinEvents.clear();
+    this._guestClock.reset();
     const base = API_BASE();
     const wsProtocol = base.startsWith('https') ? 'wss:' : 'ws:';
     const sessionId = getTabSessionId();
@@ -520,6 +538,9 @@ export class Esp32Bridge {
       }
 
       switch (msg.type) {
+        case 'guest_clock':
+          this._guestClock.update(Number(msg.data.us));
+          break;
         case 'serial_output': {
           const text = (msg.data.data as string) ?? '';
           const uart = msg.data.uart as number | undefined;
@@ -789,6 +810,7 @@ export class Esp32Bridge {
       this.socket = null;
     }
     this._connected = false;
+    this._guestClock.reset();
   }
 
   /**

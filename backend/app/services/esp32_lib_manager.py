@@ -33,6 +33,8 @@ Events emitted via callback(event_type, data):
   ledc_duty     {channel: int, duty_pct: float}
   gpio_routing  {gpio: int, signal_id: int}
   gpio_routing_clear {gpio: int}
+  guest_clock   {us: int}   (a run under -icount: what the guest's clock
+                 reads, every 20 ms; see guest_clock_beacon in esp32_worker.py)
   error         {message: str}
 """
 import asyncio

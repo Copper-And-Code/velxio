@@ -648,8 +648,9 @@ export class Esp32BridgeShim {
    *
    * An in-browser engine carries its own virtual clock, and a part generating a
    * time-varying signal has to step it on THAT clock — see `guestMillis` in
-   * simulation/parts/partUtils. Optional on the bridge: the stock QEMU
-   * `Esp32Bridge` does not implement it and answers -1 here.
+   * simulation/parts/partUtils. The QEMU `Esp32Bridge` answers what its
+   * worker says of a guest that counts instructions (a run under -icount),
+   * and -1 for one on host time, where the page's clock is the same thing.
    */
   getGuestMicros(): number {
     const b = this.bridge as unknown as { getGuestMicros?: () => number };

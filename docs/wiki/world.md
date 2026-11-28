@@ -46,9 +46,8 @@ const info = await velxio.ready();
 velxio.onFrame((f) => {          // about 125 times per second
   // f.t       seconds the boards have run since Run (null while stopped)
   // f.dt      simulated seconds since the previous frame (0 while stopped): step physics
-  //           with this. It is the board's own clock where this tab has it (AVR, RP2040),
-  //           so the scene keeps step with a firmware emulated slower than real time;
-  //           the wall clock for the QEMU and Renode boards.
+  //           with this. It is the board's own clock (see "The scene's time" below),
+  //           so the scene keeps step with a firmware emulated slower than real time.
   // f.running true while a board runs
   // f.parts   { [id]: {on, brightness} LEDs, {on, r, g, b} RGB LEDs,
   //             {angle} servos and steppers, {on} buzzers,
@@ -204,10 +203,28 @@ The gallery examples put them together:
   the Waveshare board, GP8 / GP9 for the motors and GP10 / GP11 for the
   sensors.
 
-Frames of a board whose clock this tab has (AVR, RP2040) carry its guest time;
-for the QEMU and Renode boards a frame advances the scene by the wall time, at
-most 20 ms, so a busy page slows the scene instead of letting it run ahead of
-the sensor and motor messages.
+### The scene's time
+
+A frame advances the scene by the time the board's firmware saw pass, so a
+robot covers the ground its firmware expects between two looks at a sensor:
+
+- **AVR, RP2040** (emulated in the tab): the board's cycle counter.
+- **QEMU under `-icount`** (every ESP32-C3 run; an ESP32 or ESP32-S3
+  MicroPython run that times a sensor's pulses, such as a DHT22): the guest's
+  clock counts instructions, so it runs slower than the wall clock whenever
+  the host cannot keep up and stands still when the emulator does. The worker
+  says what it reads 50 times a second (`guest_clock`) and the scene steps on
+  that (`RemoteGuestClock.ts`): the robot moves in slow motion, in step with
+  the firmware. An ESP32-C3 busy-waiting in its loop runs at well under a
+  tenth of real time; one that sleeps 20 ms a turn at about a quarter.
+- **QEMU on host time** (the other ESP32 and ESP32-S3 runs, the RP2350) and
+  **Renode**: the wall clock, at most 20 ms a frame, so a busy page slows the
+  scene instead of letting it run ahead of the sensor and motor messages. For
+  QEMU the wall clock is the clock the firmware reads. The emulated CPU is
+  what gets slower on a busy host: the ESP32-4848S040 robot's loop runs about
+  50 times a second on a free core and still follows the tape; on a core
+  shared four ways it drops to 25 and the robot runs off the track. The
+  RP2350 robot keeps 80 a second there.
 
 ## A model from a file
 

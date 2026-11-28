@@ -201,10 +201,12 @@ export class WorldHost {
 
   /**
    * Seconds the boards ran since the last frame: the guest clock of the first
-   * running board that has one in this tab (an AVR's cycles, an RP2040's
-   * timer), so physics keeps step with the firmware whatever speed it is
-   * emulated at; the wall time for a board whose clock is elsewhere (QEMU,
-   * Renode). A jump (a new board, a reset) counts as one wall frame.
+   * running board that has one this tab can read (an AVR's cycles, an
+   * RP2040's timer, what a QEMU worker says of a guest under -icount), so
+   * physics keeps step with the firmware whatever speed it is emulated at;
+   * the wall time for a board on host time (QEMU without -icount), which is
+   * the clock its firmware reads. A jump (a new board, a reset) counts as one
+   * wall frame.
    *
    * Wall time is capped at WALL_DT_MAX per frame: while the page is busy (a
    * slow 3D frame, a burst of messages) the scene slows down instead of

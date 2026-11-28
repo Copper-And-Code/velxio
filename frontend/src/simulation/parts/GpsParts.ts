@@ -184,9 +184,8 @@ PartSimulationRegistry.register('gps-neo6m', {
     // `pending` is the cycle being shifted out, one character every
     // GPS_BYTE_MS of guest time from `byteDueAt`; a new cycle opens at
     // `nextCycleAt`, once the previous one is out. All in guest milliseconds
-    // from guestMillis(); a board whose clock lives in another process (the
-    // QEMU lanes) has none readable here and gets the wall clock, which is
-    // the rate such a guest runs at anyway.
+    // from guestMillis(); a QEMU board on host time has none readable here
+    // and gets the wall clock, which is the rate such a guest runs at.
     let pending: number[] = [];
     let byteDueAt = 0;
     let nextCycleAt: number | null = null;

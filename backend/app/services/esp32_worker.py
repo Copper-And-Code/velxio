@@ -717,6 +717,33 @@ LINE_MODEL_TYPES = ('dht22', 'dht11', 'hc-sr04', 'ir-nec', 'matrix-keypad')
 LINE_SENSOR_TYPES = ('dht22', 'dht11', 'hc-sr04', 'ir-nec')
 
 
+# How far apart the worker says what the guest's clock reads (guest_clock_beacon).
+GUEST_CLOCK_BEACON_S = 0.02
+
+
+def guest_clock_beacon(stopped, clock_ns, emit, period_s: float = GUEST_CLOCK_BEACON_S) -> None:
+    """Say what the guest's clock reads, `period_s` apart, until `stopped` is set.
+
+    Under -icount the guest's clock counts instructions: it runs slower than
+    the wall clock whenever the host cannot keep up (a 4848S040 app at shift 4
+    runs at about half speed) and stands still with the emulator. Whatever the
+    page steps in time for this board (a World scene's physics, a sensor's
+    waveform, a capture of the circuit) has to step on that clock, or a robot
+    moves twice as far between two looks of the firmware as the firmware
+    thinks. So the page is told what the clock reads (`guest_clock`, us) and
+    goes on from there (RemoteGuestClock.ts).
+
+    A clock that has not moved is said all the same: that is how the page
+    learns the guest stands still. Without -icount the clock is the host's,
+    the page's own is the same thing, and this does not run.
+    """
+    while not stopped.wait(period_s):
+        try:
+            emit({'type': 'guest_clock', 'us': int(clock_ns()) // 1000})
+        except Exception:
+            pass
+
+
 def icount_shift_for_run(machine: str, wifi_enabled: bool, sensors: list,
                          firmware_is_upy: bool) -> int | None:
     """The `-icount` shift for this run, or None to leave guest time on host time."""
@@ -3449,6 +3476,11 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 pass
 
     threading.Thread(target=_ledc_poll_thread, daemon=True, name='ledc-poll').start()
+
+    # ── 7b. The guest's clock, for the page (see guest_clock_beacon) ──────────
+    if icount_shift is not None and _guest_clock_ns is not None:
+        threading.Thread(target=guest_clock_beacon, args=(_stopped, _guest_clock_ns, _emit),
+                         daemon=True, name='guest-clock').start()
 
     # ── 8. Command loop (main thread reads original stdin pipe) ───────────────
 
