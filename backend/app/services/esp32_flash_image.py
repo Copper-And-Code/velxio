@@ -49,14 +49,18 @@ def pad_to_flash_size(fw_bytes: bytes, min_bytes: int = 0) -> bytes:
     return fw_bytes + b'\xff' * (target - len(fw_bytes))
 
 
-_MICROPYTHON_BANNER = re.compile(rb'MicroPython v\d+\.\d+')
+# "MicroPython v1.28.0 on 2026-04-06" in a release build; a build from a
+# commit between two tags says the commit instead ("MicroPython 0fd6c573ea on
+# 2026-11-26", the VELXIO firmware of the ESP32-4848S040). The build date is
+# what both end with.
+_MICROPYTHON_BANNER = re.compile(rb'MicroPython [0-9A-Za-z.+_-]{1,48} on 20\d\d-\d\d-\d\d')
 
 
 def firmware_is_micropython(image: bytes) -> bool:
     """True when a flash image carries a MicroPython app.
 
     The REPL banner ("MicroPython v1.28.0 on 2026-04-06; ...") is a string
-    literal in every build's .rodata, so its prefix is the signature. The
+    literal in every build's .rodata, so its start is the signature. The
     `esp_app_desc_t` every ESP-IDF app carries would be the principled place
     to look, but MicroPython builds leave its `version` and `project_name`
     fields all zeros (checked against ESP32_GENERIC v1.28.0: only `time`,

@@ -230,8 +230,14 @@ robot covers the ground its firmware expects between two looks at a sensor:
   the host cannot keep up and stands still when the emulator does. The worker
   says what it reads 50 times a second (`guest_clock`) and the scene steps on
   that (`RemoteGuestClock.ts`): the robot moves in slow motion, in step with
-  the firmware. An ESP32-C3 busy-waiting in its loop runs at well under a
-  tenth of real time; one that sleeps 20 ms a turn at about a quarter.
+  the firmware. An ESP32-C3 runs at shift 5 (an instruction is 32 ns of its
+  clock): a loop that busy-waits (MicroPython's `sleep_ms(5)`, under a
+  FreeRTOS tick) at about a quarter of real time, one that sleeps 20 ms a
+  turn at a little under half, plain code at real time. It ran at shift 3,
+  four times slower in the first case; a run with a sensor whose pulses the
+  firmware times (DHT22, HC-SR04, IR) still does. A guest that computes is
+  held to the wall clock (`GuestPace` in `esp32_worker.py`): it never plays
+  faster than real time.
 - **Renode** (the STM32H743 Core): the firmware's clock is Renode's virtual
   time, which the lane sends with every look at the pads (`guest_clock`
   again). It falls behind the wall clock while the host cannot keep up (the

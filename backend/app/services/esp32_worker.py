@@ -703,7 +703,27 @@ class _RmtDecoder:
 # Arduino runs keep the fast boot: Adafruit's DHT.h counts reads and the
 # HC-SR04 echo is timed on the guest clock, both fine at host time. WiFi keeps
 # -icount off: the AP beacon timer runs on QEMU_CLOCK_REALTIME (issue #260).
-ICOUNT_SHIFT_C3 = 3
+#
+# The ESP32-C3 always counts instructions (it does not boot otherwise), and the
+# shift is how fast its clock runs: at shift N an instruction is 2^N ns of
+# guest time, and this emulator executes 35 to 50 million a second of plain
+# code and about 8 of code that polls a register (a busy-wait: delayMicro-
+# seconds, MicroPython's sleep_ms below a FreeRTOS tick). At shift 3 (125 MIPS,
+# near the chip's own speed) the guest ran at 0.29 of the wall clock in a
+# loop, 0.09 in a loop of sleep_ms(5), 0.28 with sleep_ms(20). At shift 5
+# (31 MIPS) those are 1.0, 0.33 and 0.54: three to four times closer to real
+# time where it was slowest. The guest's CPU is that much slower by its own
+# clock; the code runs as fast as before by the wall clock. The boot (1.5 s to
+# MicroPython's prompt) does not change.
+#
+# A run with a sensor whose pulses the guest times stays at shift 3: an
+# interrupt in the middle of a pulse lasts four times as long by the guest's
+# clock at shift 5, the hiccup the Xtensa note above is about. Measured on the
+# MicroPython C3 firmware with the prebuilt library; an Arduino C3 image could
+# not be built where this was written. VELXIO_ICOUNT_SHIFT_C3 in the backend's
+# environment sets another shift.
+ICOUNT_SHIFT_C3 = int(os.environ.get('VELXIO_ICOUNT_SHIFT_C3', '5'))
+ICOUNT_SHIFT_C3_TIMED_SENSORS = 3
 ICOUNT_SHIFT_LINE_SENSORS = 4
 # Every sensor whose MODEL runs in this worker, on a line it owns. The frontend
 # keeps no copy of this: an ESP32 board takes every line sensor the contract
@@ -744,14 +764,71 @@ def guest_clock_beacon(stopped, clock_ns, emit, period_s: float = GUEST_CLOCK_BE
             pass
 
 
+class GuestPace:
+    """Keeps a guest under -icount from running ahead of the wall clock.
+
+    Under -icount the guest's clock counts instructions, and QEMU holds it to
+    the wall clock only while the guest is idle (it sleeps to the next timer).
+    A guest that computes runs it as fast as the host executes: on a host
+    quicker than the shift's 2^N ns an instruction, faster than real time
+    (the C3 at shift 5 ran a loop 1.1 times as fast on the machine this was
+    written on, and a quicker one would double that). A sketch's millis()
+    then outruns the wall clock and a World scene plays fast-forward.
+
+    step() is given the two clocks and answers how long to hold the emulator
+    for it to be on time again: nothing while it is less than AHEAD_NS ahead,
+    at most MAX_HOLD_NS a time. A guest that fell BEHIND_NS behind (a busy
+    host, code the emulator runs slowly) is not made to catch up: the two
+    clocks are tied again where they are, so it never plays fast to make up
+    for time it lost.
+    """
+
+    AHEAD_NS = 2_000_000
+    BEHIND_NS = 20_000_000
+    MAX_HOLD_NS = 20_000_000
+
+    def __init__(self) -> None:
+        self._guest0: int | None = None
+        self._wall0 = 0
+
+    def step(self, guest_ns: int, wall_ns: int) -> int:
+        if self._guest0 is None or guest_ns < self._guest0:    # the first look, or a reset
+            self._guest0, self._wall0 = guest_ns, wall_ns
+            return 0
+        ahead = (guest_ns - self._guest0) - (wall_ns - self._wall0)
+        if ahead < -self.BEHIND_NS:
+            self._guest0, self._wall0 = guest_ns, wall_ns
+            return 0
+        return min(ahead, self.MAX_HOLD_NS) if ahead > self.AHEAD_NS else 0
+
+
+# How often the pace of a guest under -icount is looked at (guest_pace_loop).
+GUEST_PACE_PERIOD_S = 0.004
+
+
+def guest_pace_loop(stopped, clock_ns, hold, period_s: float = GUEST_PACE_PERIOD_S,
+                    wall_ns=time.monotonic_ns) -> None:
+    """Hold the emulator (`hold(seconds)`) whenever the guest is ahead of the
+    wall clock, until `stopped` is set. See GuestPace."""
+    pace = GuestPace()
+    while not stopped.wait(period_s):
+        try:
+            ns = pace.step(int(clock_ns()), wall_ns())
+            if ns:
+                hold(ns / 1e9)
+        except Exception:
+            pass
+
+
 def icount_shift_for_run(machine: str, wifi_enabled: bool, sensors: list,
                          firmware_is_upy: bool) -> int | None:
     """The `-icount` shift for this run, or None to leave guest time on host time."""
+    timed = any(str(s.get('sensor_type', '')) in LINE_SENSOR_TYPES for s in sensors)
     if 'c3' in machine:
-        return ICOUNT_SHIFT_C3
+        return ICOUNT_SHIFT_C3_TIMED_SENSORS if timed else ICOUNT_SHIFT_C3
     if wifi_enabled or not firmware_is_upy:
         return None
-    if not any(str(s.get('sensor_type', '')) in LINE_SENSOR_TYPES for s in sensors):
+    if not timed:
         return None
     return ICOUNT_SHIFT_LINE_SENSORS
 
@@ -3481,6 +3558,20 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
     if icount_shift is not None and _guest_clock_ns is not None:
         threading.Thread(target=guest_clock_beacon, args=(_stopped, _guest_clock_ns, _emit),
                          daemon=True, name='guest-clock').start()
+
+        # ── 7c. ... held to the wall clock when it runs ahead (see GuestPace) ──
+        # The emulator stands still while another thread has QEMU's lock: the
+        # vCPU takes it at every register access and timer deadline.
+        if _lock_iothread and _unlock_iothread:
+            def _hold_emulator(seconds: float) -> None:
+                _lock_iothread(b'esp32_worker.py:guest_pace', 0)
+                try:
+                    time.sleep(seconds)
+                finally:
+                    _unlock_iothread()
+
+            threading.Thread(target=guest_pace_loop, args=(_stopped, _guest_clock_ns, _hold_emulator),
+                             daemon=True, name='guest-pace').start()
 
     # ── 8. Command loop (main thread reads original stdin pipe) ───────────────
 

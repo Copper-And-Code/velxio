@@ -34,6 +34,7 @@ from app.services.esp32_dht22 import (
 from app.services.esp32_flash_image import firmware_is_micropython
 from app.services.esp32_worker import (
     ICOUNT_SHIFT_C3,
+    ICOUNT_SHIFT_C3_TIMED_SENSORS,
     ICOUNT_SHIFT_LINE_SENSORS,
     icount_shift_for_run,
 )
@@ -343,6 +344,20 @@ class TestIcountPolicy(unittest.TestCase):
 
     def test_c3_always(self):
         self.assertEqual(icount_shift_for_run('esp32c3-picsimlab', True, [], False), ICOUNT_SHIFT_C3)
+        self.assertEqual(icount_shift_for_run('esp32c3-picsimlab', False, [], True), ICOUNT_SHIFT_C3)
+
+    def test_c3_with_a_timed_sensor_keeps_the_fine_clock(self):
+        # an interrupt inside a pulse lasts 2^shift ns an instruction by the guest's clock
+        for firmware_is_upy in (False, True):
+            self.assertEqual(icount_shift_for_run('esp32c3-picsimlab', False, self.DHT, firmware_is_upy),
+                             ICOUNT_SHIFT_C3_TIMED_SENSORS)
+        self.assertEqual(
+            icount_shift_for_run('esp32c3-picsimlab', False, [{'sensor_type': 'hc-sr04', 'pin': 5}], False),
+            ICOUNT_SHIFT_C3_TIMED_SENSORS)
+        self.assertLess(ICOUNT_SHIFT_C3_TIMED_SENSORS, ICOUNT_SHIFT_C3)
+        # a sensor the guest does not time changes nothing
+        self.assertEqual(icount_shift_for_run('esp32c3-picsimlab', False, [{'sensor_type': 'ssd1306', 'pin': 200}], False),
+                         ICOUNT_SHIFT_C3)
 
     def test_micropython_with_line_sensor(self):
         self.assertEqual(icount_shift_for_run('esp32-picsimlab', False, self.DHT, True), ICOUNT_SHIFT_LINE_SENSORS)
@@ -363,9 +378,20 @@ class TestFirmwareIsMicroPython(unittest.TestCase):
     def test_banner_string(self):
         self.assertTrue(firmware_is_micropython(b'\xff' * 100 + b'MicroPython v1.28.0 on 2026-04-06; Generic ESP32 module with ESP32' + b'\x00' * 100))
 
+    def test_a_build_between_two_tags_says_its_commit(self):
+        # the VELXIO firmware of the ESP32-4848S040: it was taken for an Arduino
+        # image, so a DHT22 on it ran without -icount and never read
+        self.assertTrue(firmware_is_micropython(
+            b'\xff' * 100 + b'MicroPython 0fd6c573ea on 2026-11-26\x00\x00\x00\x00; ESP32-4848S040 Velxio with ESP32-S3'))
+        self.assertTrue(firmware_is_micropython(b'MicroPython v1.29.0-patched on 2026-11-26; STM32H7_CORE'))
+        self.assertTrue(firmware_is_micropython(b'MicroPython v1.25.0-preview.123.gabcdef12 on 2025-01-02'))
+
     def test_arduino_image(self):
         self.assertFalse(firmware_is_micropython(b'\xe9\x06\x02\x20' + b'\x00' * 4096 + b'Failed to read from DHT sensor!'))
         self.assertFalse(firmware_is_micropython(b''))
+        # the words alone are not the banner (a sketch that prints them, a library's text)
+        self.assertFalse(firmware_is_micropython(b'Welcome to MicroPython on the ESP32!'))
+        self.assertFalse(firmware_is_micropython(b'MicroPython-1.29.0-xtensa-IDFv5.5.2-with-newlib4.3.0'))
 
 
 if __name__ == '__main__':
