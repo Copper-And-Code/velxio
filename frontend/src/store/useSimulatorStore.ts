@@ -1407,7 +1407,7 @@ class Stm32H7BridgeShim {
   private bridge: Stm32H7Bridge;
   /** The RP2350 lane numbers its pads GP0-47, not port*16 + pin. */
   private readonly gpPins: boolean;
-  /** RP2350: the level the circuit drives on each pad (see setPinState). */
+  /** The level the circuit drives on each pad (see setPinState). */
   private circuitLevels = new Map<number, boolean>();
 
   constructor(bridge: Stm32H7Bridge, pm: PinManager, gpPins = false) {
@@ -1425,14 +1425,15 @@ class Stm32H7BridgeShim {
   setPinState(pin: number, state: boolean): void {
     if (pin < 0 || pin > (this.gpPins ? 47 : 127)) return; // rails and unmapped pads
     const driven = this.pinManager.getOutputPins().has(pin); // the firmware drives it
+    // A level written while the firmware drives the pad must reach the board
+    // all the same, for when it lets the pad go (an SD pin the RP2350's boot
+    // used, then a Pin.IN of the app): a part writes its level once. The
+    // RP2350 machine keeps the circuit's level next to its own drive; Renode
+    // keeps the level given to an STM32H7 pad whatever its mode.
+    this.circuitLevels.set(pin, state);
     if (this.gpPins) {
-      // The RP2350 machine keeps the circuit's level next to its own drive,
-      // and reads it once its firmware lets the pad go (an SD pin the boot
-      // used, then a Pin.IN of the app): a level written meanwhile must
-      // reach it, a part writes it once.
-      this.circuitLevels.set(pin, state);
       this.bridge.setGpioInputPin(pin, state);
-    } else if (!driven) {
+    } else {
       const name = stm32LinearToPinName(pin); // 'PA0'
       this.bridge.setGpioInput(name[1], pin % 16, state);
     }
@@ -1441,8 +1442,8 @@ class Stm32H7BridgeShim {
     this.onPinChangeWithTime?.(pin, state, performance.now());
   }
 
-  /** RP2350: the firmware let pad `pin` go, so the level on it is the
-   *  circuit's again, for the parts and the scope as well. */
+  /** The firmware let pad `pin` go, so the level on it is the circuit's
+   *  again, for the parts and the scope as well. */
   padReleased(pin: number): void {
     const state = this.circuitLevels.get(pin);
     if (state === undefined) return;
@@ -1495,6 +1496,11 @@ class Stm32H7BridgeShim {
   }
   getClockHz(): number {
     return 480_000_000;
+  }
+  /** The board's clock as its lane tells it (Renode's virtual time for the
+   *  STM32H7), -1 for a board on host time (the RP2350). See guestMillis. */
+  getGuestMicros(): number {
+    return this.bridge.getGuestMicros();
   }
   getADC(): null {
     return null;
@@ -2621,21 +2627,22 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       const gpPins = boardKind === 'waveshare-rp2350-lcd4';
       const shim = new Stm32H7BridgeShim(bridge, pm, gpPins);
       shim.onPinChangeWithTime = getOscilloscopeCallback(id);
-      // RP2350: a pad a PWM channel drives counts as its duty (the parts
-      // that follow a pin read getPwmValue); null when PWM lets it go.
+      // A pad a PWM channel drives counts as its duty (the parts that follow
+      // a pin read getPwmValue); null when PWM lets it go.
       bridge.onPwm = (pin, duty) => {
         pinManagerMap.get(id)?.updatePwm(pin, duty ?? 0);
       };
-      // RP2350: a pad the firmware stops driving is an input again, so the
-      // parts and the solved circuit can drive it (an SD pin the boot used,
+      // A pad the firmware stops driving is an input again, so the parts and
+      // the solved circuit can drive it (an SD pin the RP2350's boot used,
       // then a Pin.IN of the app).
       bridge.onGpioDir = (pin, dir) => {
         pinManagerMap.get(id)?.setPinDirection(pin, dir);
         if (!dir) shim.padReleased(pin);
       };
-      // RP2350: the pad's internal pull, so the netlist stamps its weak
-      // resistor (a button to ground on a Pin.PULL_UP reads HIGH when open).
-      // The machine applies the pull itself to a pad nothing drives.
+      // The pad's internal pull, so the netlist stamps its weak resistor (a
+      // button to ground on a Pin.PULL_UP reads HIGH when open). The RP2350
+      // machine applies the pull itself to a pad nothing drives; Renode
+      // models none, so an STM32H7 pad reads what the circuit says.
       bridge.onGpioPull = (pin, pull) => {
         pinManagerMap.get(id)?.setPinPull(pin, pull);
       };

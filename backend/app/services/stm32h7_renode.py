@@ -12,6 +12,11 @@ register_ws_sim_disconnect) that lane uses.
     stm32h7_serial_input  {bytes: [int]}
     stm32h7_gpio_input    {port: 'A'..'K', pin: 0..15, value: bool}
     stm32h7_touch_input   {x, y, pressed}
+
+Events, besides serial_output, framebuffer, framebuffer_patch, display_stats,
+system and error: the pads (stm32h7_gpio_dir, stm32h7_gpio_change,
+stm32h7_pwm, stm32h7_gpio_pull: see stm32h7_pads.py) and `guest_clock {us}`,
+Renode's virtual time, which is the clock the firmware reads.
 """
 import logging
 

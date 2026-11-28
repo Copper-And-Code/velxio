@@ -26,6 +26,8 @@ import time
 import tty
 from typing import Awaitable, Callable
 
+from app.services import stm32h7_pads
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -156,6 +158,11 @@ _GPIO_BASE = {
 _GPIO_ODR_OFFSET = 0x14
 _GPIO_POLL_PORTS = ('A', 'B', 'C')
 _GPIO_POLL_MS = int(os.environ.get('VELXIO_STM32_GPIO_POLL_MS', '50'))
+# How often the pads are looked at over the binary socket (_poll_pads_once):
+# the GPIO and timer registers and the machine's clock, in one trip. It is also
+# how often the page is told that clock (`guest_clock`), which it goes on from
+# for 80 ms at most (RemoteGuestClock.ts).
+_PADS_POLL_S = max(0.005, int(os.environ.get('VELXIO_STM32_PADS_POLL_MS', '20')) / 1000.0)
 
 
 def _strip_echo_and_prompt(text: str, sent_cmd: str) -> str:
@@ -257,6 +264,18 @@ class RenodeInstance:
         self._touch_reader:  asyncio.StreamReader | None = None
         self._touch_writer:  asyncio.StreamWriter | None = None
         self._touch_io_lock: asyncio.Lock = asyncio.Lock()
+        # The pads' own binary connection (a framebuffer read can take the
+        # other one for tens of milliseconds): register looks and input levels.
+        self._pads_reader:   asyncio.StreamReader | None = None
+        self._pads_writer:   asyncio.StreamWriter | None = None
+        self._pads_io_lock:  asyncio.Lock = asyncio.Lock()
+        self.pads = stm32h7_pads.PadTracker()
+        # The level the circuit drives on each pad, and the one Renode has
+        # been given: a level asked for before Renode listens (a line sensor
+        # on the tape at Run) is kept and written when it does.
+        self.inputs:      dict[tuple[str, int], bool] = {}
+        self.inputs_sent: dict[tuple[str, int], bool] = {}
+        self._inputs_lock: asyncio.Lock = asyncio.Lock()
         self._fb_binary_ok:  bool = False
         self._binary_warned: dict[str, bool] = {}
         self._binary_retry_after: dict[str, float] = {}
@@ -351,10 +370,33 @@ class RenodeManager:
         if port_u not in _GPIO_BASE or not (0 <= pin < 16):
             logger.warning('set_gpio_input: invalid port=%s pin=%s', port, pin)
             return
-        cmd = (f'sysbus.gpioPort{port_u} OnGPIO {pin} '
-               f'{"true" if value else "false"}')
-        await self._monitor_cmd(inst, cmd, timeout=2.0)
-        self._wake_framebuffer_poll(inst)
+        inst.inputs[(port_u, pin)] = bool(value)
+        await self._flush_inputs(inst)
+
+    async def _flush_inputs(self, inst: RenodeInstance) -> None:
+        """Give Renode the levels it has not been given yet.
+
+        A part says its level once, or again and again unchanged (a line
+        sensor says it on every frame of the scene): Renode is told when it
+        changes. A level that could not be written (Renode still starting) is
+        tried again at the next look at the pads.
+        """
+        if not inst._mon_writer:
+            return                      # Renode is not up yet: the pads' poll writes them
+        wrote = False
+        async with inst._inputs_lock:   # one writer: the levels reach Renode in order
+            for pad, value in list(inst.inputs.items()):
+                if inst.inputs_sent.get(pad) == value:
+                    continue
+                port, pin = pad
+                if not await self._gpio_input_binary(inst, port, pin, value):
+                    cmd = (f'sysbus.gpioPort{port} OnGPIO {pin} '
+                           f'{"true" if value else "false"}')
+                    await self._monitor_cmd(inst, cmd, timeout=2.0)
+                inst.inputs_sent[pad] = value
+                wrote = True
+        if wrote:
+            self._wake_framebuffer_poll(inst)
 
     async def inject_touch(self, client_id: str,
                            x: int, y: int, pressed: bool) -> None:
@@ -719,6 +761,9 @@ class RenodeManager:
         if kind == 'touch':
             reader_attr = '_touch_reader'
             writer_attr = '_touch_writer'
+        elif kind == 'pads':
+            reader_attr = '_pads_reader'
+            writer_attr = '_pads_writer'
         else:
             reader_attr = '_fb_reader'
             writer_attr = '_fb_writer'
@@ -830,6 +875,59 @@ class RenodeManager:
             inst._touch_writer = None
             inst._binary_retry_after['touch'] = asyncio.get_running_loop().time() + 2.0
             return False
+
+    async def _pads_request(self, inst: RenodeInstance, request: bytes,
+                            reply_bytes: int) -> bytes | None:
+        """One command on the pads' binary connection: its data, or None when
+        the connection is not there or the server refused the command."""
+        if not _FB_BINARY_TRANSPORT or not inst.fb_port:
+            return None
+        async with inst._pads_io_lock:
+            if not await self._connect_binary_stream(inst, 'pads'):
+                return None
+            assert inst._pads_reader is not None
+            assert inst._pads_writer is not None
+            try:
+                inst._pads_writer.write(request)
+                await inst._pads_writer.drain()
+                header = await asyncio.wait_for(
+                    inst._pads_reader.readexactly(8), timeout=2.0)
+                if header[:4] != b'VXFR':
+                    raise ValueError(f'bad pads binary response {header[:4]!r}')
+                if struct.unpack('<I', header[4:])[0] != 0:
+                    return None
+                if not reply_bytes:
+                    return b''
+                return await asyncio.wait_for(
+                    inst._pads_reader.readexactly(reply_bytes), timeout=2.0)
+            except Exception as e:
+                logger.warning('%s: pads binary request failed (%s)', inst.client_id, e)
+                try:
+                    inst._pads_writer.close()
+                    await inst._pads_writer.wait_closed()
+                except Exception:
+                    pass
+                inst._pads_reader = None
+                inst._pads_writer = None
+                inst._binary_retry_after['pads'] = asyncio.get_running_loop().time() + 2.0
+                return None
+
+    async def _peek(self, inst: RenodeInstance,
+                    addrs: list[int]) -> tuple[int, tuple[int, ...]] | None:
+        """The machine's virtual time (us) and the doublewords at `addrs`."""
+        n = len(addrs)
+        data = await self._pads_request(
+            inst, b'VXPK' + struct.pack('<II', n, 0) + struct.pack(f'<{n}I', *addrs),
+            8 + 4 * n)
+        if data is None:
+            return None
+        return struct.unpack_from('<Q', data)[0], struct.unpack_from(f'<{n}I', data, 8)
+
+    async def _gpio_input_binary(self, inst: RenodeInstance, port: str,
+                                 pin: int, value: bool) -> bool:
+        data = await self._pads_request(
+            inst, b'VXGI' + struct.pack('<II', ord(port), pin | (0x100 if value else 0)), 0)
+        return data is not None
 
     def _record_framebuffer_poll(self, inst: RenodeInstance, *,
                                  width: int, height: int, fmt: str,
@@ -1290,44 +1388,87 @@ class RenodeManager:
                 await asyncio.sleep(1.0)
 
     async def _poll_gpio_loop(self, inst: RenodeInstance) -> None:
-        """Poll GPIOx_ODR every `_GPIO_POLL_MS` ms, emit per-pin transitions.
+        """Follow the pads for as long as the board runs.
 
-        Bit i of ODR reflects what the firmware has driven on pin i when the
-        pin is configured as a push-pull/open-drain output. For input or
-        alternate-function pins ODR keeps its last-written value (usually 0)
-        which is harmless — we just emit a constant 0 for those bits, and
-        consumers that aren't wired to those pins ignore them anyway.
+        Over the binary socket (_poll_pads_once): direction, level, PWM duty
+        and pull of each pad, and the machine's clock, every `_PADS_POLL_S`.
+        Without it (VELXIO_STM32_FB_BINARY=0, or the server not there), the
+        ODR of each port through the monitor's text (_poll_odr_once).
         """
         delay = max(0.02, _GPIO_POLL_MS / 1000.0)
         while inst.running:
             try:
+                if await self._poll_pads_once(inst):
+                    await asyncio.sleep(_PADS_POLL_S)
+                    continue
                 await asyncio.sleep(delay)
-                for port in _GPIO_POLL_PORTS:
-                    addr = _GPIO_BASE[port] + _GPIO_ODR_OFFSET
-                    val = await self._read_register(inst, addr)
-                    if val is None:
-                        continue
-                    val &= 0xFFFF
-                    last = inst._gpio_last.get(port)
-                    if last is not None and val == last:
-                        continue
-                    # On the first successful read for this port we emit the
-                    # full state so subscribers can hydrate their UI; after
-                    # that we only emit pins that toggled.
-                    changed = 0xFFFF if last is None else (val ^ last)
-                    inst._gpio_last[port] = val
-                    for bit in range(16):
-                        if changed & (1 << bit):
-                            await inst.emit('stm32h7_gpio_change', {
-                                'port':  port,
-                                'pin':   bit,
-                                'value': bool(val & (1 << bit)),
-                            })
+                await self._poll_odr_once(inst)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.warning('%s: gpio poll: %s', inst.client_id, e)
                 await asyncio.sleep(0.5)
+
+    async def _poll_pads_once(self, inst: RenodeInstance) -> bool:
+        """One look at the pads: False when the binary socket is not there.
+
+        Two trips: the GPIO registers, which say the timers a pad is handed
+        to, then those timers' registers with the clock. What changed since
+        the last look goes to the page (stm32h7_pads.PadTracker), then the
+        clock (`guest_clock`): the firmware's time is Renode's virtual time,
+        which falls behind the wall clock while the host cannot keep up.
+        """
+        await self._flush_inputs(inst)
+        ports = stm32h7_pads.PORTS
+        width = len(stm32h7_pads.GPIO_REGS)
+        look = await self._peek(inst, stm32h7_pads.gpio_addresses())
+        if look is None:
+            return False
+        micros, values = look
+        gpio = {port: values[i * width:(i + 1) * width] for i, port in enumerate(ports)}
+        timers: dict[int, tuple[int, ...]] = {}
+        in_use = stm32h7_pads.PadTracker.timers_in_use(gpio)
+        if in_use:
+            look = await self._peek(inst, stm32h7_pads.timer_addresses(in_use))
+            if look is None:
+                return False
+            micros, values = look
+            width = len(stm32h7_pads.TIM_REGS)
+            timers = {t: values[i * width:(i + 1) * width] for i, t in enumerate(in_use)}
+        for event_type, data in inst.pads.update(gpio, timers):
+            await inst.emit(event_type, data)
+        await inst.emit('guest_clock', {'us': micros})
+        return True
+
+    async def _poll_odr_once(self, inst: RenodeInstance) -> None:
+        """GPIOx_ODR of each port through the monitor, per-pin transitions.
+
+        Bit i of ODR reflects what the firmware has driven on pin i when the
+        pin is configured as a push-pull/open-drain output. For input or
+        alternate-function pins ODR keeps its last-written value (usually 0):
+        this path cannot tell them from outputs.
+        """
+        for port in _GPIO_POLL_PORTS:
+            addr = _GPIO_BASE[port] + _GPIO_ODR_OFFSET
+            val = await self._read_register(inst, addr)
+            if val is None:
+                continue
+            val &= 0xFFFF
+            last = inst._gpio_last.get(port)
+            if last is not None and val == last:
+                continue
+            # On the first successful read for this port we emit the
+            # full state so subscribers can hydrate their UI; after
+            # that we only emit pins that toggled.
+            changed = 0xFFFF if last is None else (val ^ last)
+            inst._gpio_last[port] = val
+            for bit in range(16):
+                if changed & (1 << bit):
+                    await inst.emit('stm32h7_gpio_change', {
+                        'port':  port,
+                        'pin':   bit,
+                        'value': bool(val & (1 << bit)),
+                    })
 
     # ── Renode stdout watcher ─────────────────────────────────────────────────
 
@@ -1404,6 +1545,15 @@ class RenodeManager:
                 pass
             inst._touch_writer = None
             inst._touch_reader = None
+
+        if inst._pads_writer:
+            try:
+                inst._pads_writer.close()
+                await inst._pads_writer.wait_closed()
+            except Exception:
+                pass
+            inst._pads_writer = None
+            inst._pads_reader = None
 
         pty_slave_name: str | None = None
         if inst.pty_slave_fd is not None:

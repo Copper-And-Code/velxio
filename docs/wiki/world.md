@@ -148,11 +148,23 @@ still to be checked):
   lane reports the pulls as `rp2350_gpio_pull`, for the netlist), and a level
   the circuit drives raises the pin's interrupt (`Pin.irq`), within a
   millisecond of guest time.
+- **STM32H743 Core** (Renode): the header pads of ports A, B and C. Renode
+  models the chip's registers and no pads, so the lane reads them 50 times a
+  second over its binary socket (`renode/extensions/velxio_framebuffer_server.py`,
+  `VXPK`) and `stm32h7_pads.py` says what each pad is: `stm32h7_gpio_dir` (the
+  firmware drives it: an output, or a timer channel in PWM),
+  `stm32h7_gpio_change` (an output's level), `stm32h7_pwm` (the duty of the
+  timer channel `machine.PWM` put on the pad: CCR over ARR + 1) and
+  `stm32h7_gpio_pull`. A pad it does not drive takes the circuit's level
+  (`stm32h7_gpio_input`), kept by the lane until Renode listens. The example
+  uses PB8 / PB9 (timer 4, channels 3 and 4) for the motors and PB10 / PB11
+  for the sensors; each header pin's description names its timer channel.
+  Renode models no pull: a pad reads what the circuit says.
 
 A level the circuit drives reaches a backend board whenever it is written: one
 written while the WebSocket of the run is still opening is sent after the
-start message, and on the RP2350 one written while the firmware still drives
-the pad is the pad's level once it is let go.
+start message, and on the RP2350 and the STM32H7 one written while the
+firmware still drives the pad is the pad's level once it is let go.
 
 A line sensor pair sits 1.6 cm apart by default (`lineSpacing` on the robot),
 inside a 2.2 cm tape: on the tape both read black, and a robot that sees
@@ -201,7 +213,10 @@ The gallery examples put them together:
   shows them on an LVGL dashboard with a STOP / START button;
 - **RP2350-Touch-LCD-4: Line Robot with its screen (World kit)**: the same on
   the Waveshare board, GP8 / GP9 for the motors and GP10 / GP11 for the
-  sensors.
+  sensors;
+- **STM32H743 Core: Line Robot with its screen (World kit)**: the same on the
+  STM32H743 Core and its 1024x600 panel, PB8 / PB9 for the motors and PB10 /
+  PB11 for the sensors.
 
 ### The scene's time
 
@@ -217,10 +232,18 @@ robot covers the ground its firmware expects between two looks at a sensor:
   that (`RemoteGuestClock.ts`): the robot moves in slow motion, in step with
   the firmware. An ESP32-C3 busy-waiting in its loop runs at well under a
   tenth of real time; one that sleeps 20 ms a turn at about a quarter.
-- **QEMU on host time** (the other ESP32 and ESP32-S3 runs, the RP2350) and
-  **Renode**: the wall clock, at most 20 ms a frame, so a busy page slows the
-  scene instead of letting it run ahead of the sensor and motor messages. For
-  QEMU the wall clock is the clock the firmware reads. The emulated CPU is
+- **Renode** (the STM32H743 Core): the firmware's clock is Renode's virtual
+  time, which the lane sends with every look at the pads (`guest_clock`
+  again). It falls behind the wall clock while the host cannot keep up (the
+  line robot's LVGL app runs at a third to a half of real time) and runs
+  faster for a while after, to catch up. The platform file clocks SysTick
+  and the timers at the 5 MHz the firmware counts under Renode 1.16 (its RCC
+  keeps no PLL dividers); they were at 96 and 250 MHz, and a millisecond of
+  the firmware lasted 52 us.
+- **QEMU on host time** (the other ESP32 and ESP32-S3 runs, the RP2350): the
+  wall clock, at most 20 ms a frame, so a busy page slows the scene instead
+  of letting it run ahead of the sensor and motor messages. The wall clock is
+  the clock the firmware reads there. The emulated CPU is
   what gets slower on a busy host: the ESP32-4848S040 robot's loop runs about
   50 times a second on a free core and still follows the tape; on a core
   shared four ways it drops to 25 and the robot runs off the track. The

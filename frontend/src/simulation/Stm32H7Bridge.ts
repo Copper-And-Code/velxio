@@ -29,6 +29,7 @@
 
 import { getTabSessionId } from './Stm32Bridge';
 import { MicroPythonSession, type MpyProgram } from './micropythonSession';
+import { RemoteGuestClock } from './RemoteGuestClock';
 
 export type Stm32PixelFormat =
   | 'rgb565'
@@ -199,6 +200,35 @@ export class Stm32H7Bridge {
   /** Input levels waiting for the socket to open, by pad (see _sendInput). */
   private _pendingInputs = new Map<string, unknown>();
 
+  /** The machine's clock, as the lane tells it (see getGuestMicros). */
+  private _guestClock = new RemoteGuestClock();
+
+  /**
+   * The guest's clock in microseconds, or -1 when the page's own clock is the
+   * one to use. The STM32H7 runs on Renode's virtual time, which falls behind
+   * the wall clock while the host cannot keep up; its lane says what it reads
+   * with every look at the pads (`guest_clock`). The RP2350's QEMU keeps host
+   * time and says nothing. Read by guestMillis and guestMsOf: a World scene's
+   * physics, the parts that step a signal in time, the circuit's captures.
+   */
+  getGuestMicros(): number {
+    return this._guestClock.read();
+  }
+
+  /**
+   * The pad an event is about, as the number the PinManager knows it by:
+   * GP0-47 on the RP2350 (no port), port * 16 + pin on the STM32H7 (ports
+   * A to H). -1 for anything else.
+   */
+  private static _padOf(data: Record<string, unknown>): number {
+    const pin = Number(data.pin);
+    if (!Number.isInteger(pin) || pin < 0) return -1;
+    const port = String(data.port ?? '');
+    if (!port) return pin < 48 ? pin : -1;
+    const index = port.length === 1 ? port.toUpperCase().charCodeAt(0) - 65 : -1;
+    return index >= 0 && index < 8 && pin < 16 ? index * 16 + pin : -1;
+  }
+
   private _disposeSession(): void {
     this._mpySession?.dispose();
     this._mpySession = null;
@@ -208,6 +238,7 @@ export class Stm32H7Bridge {
   connect(): void {
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) return;
     this._pendingInputs.clear();
+    this._guestClock.reset();
 
     // A relative base ('/api', behind a proxy on the page's own origin, as in
     // Codespaces) is made absolute on the page's host and scheme.
@@ -269,10 +300,13 @@ export class Stm32H7Bridge {
           }
           break;
         }
+        case 'guest_clock':
+          this._guestClock.update(Number(msg.data.us));
+          break;
         case `${this.prefix}gpio_dir`: {
-          // RP2350: 1 the firmware drives GPn, 0 it let it go (an input again).
-          const pin = Number(msg.data.pin) | 0;
-          if (pin >= 0 && pin < 48) this.onGpioDir?.(pin, Number(msg.data.dir) ? 1 : 0);
+          // 1 the firmware drives the pad, 0 it let it go (an input again).
+          const pad = Stm32H7Bridge._padOf(msg.data);
+          if (pad >= 0) this.onGpioDir?.(pad, Number(msg.data.dir) ? 1 : 0);
           break;
         }
         case `${this.prefix}gpio_batch`: {
@@ -290,17 +324,18 @@ export class Stm32H7Bridge {
           break;
         }
         case `${this.prefix}gpio_pull`: {
-          // RP2350: the pad's internal pull ('up', 'down' or none).
-          const pin = Number(msg.data.pin) | 0;
+          // The pad's internal pull ('up', 'down' or none).
+          const pad = Stm32H7Bridge._padOf(msg.data);
           const pull = msg.data.pull === 'up' ? 1 : msg.data.pull === 'down' ? 2 : 0;
-          if (pin >= 0 && pin < 48) this.onGpioPull?.(pin, pull);
+          if (pad >= 0) this.onGpioPull?.(pad, pull);
           break;
         }
         case `${this.prefix}pwm`: {
-          // RP2350: the share of time a PWM channel drives GPn high (null: it stopped).
-          const pin = Number(msg.data.pin) | 0;
+          // The share of time a PWM channel drives the pad high (null: it
+          // stopped): a slice on the RP2350, a timer channel on the STM32H7.
+          const pad = Stm32H7Bridge._padOf(msg.data);
           const duty = msg.data.duty === null || msg.data.duty === undefined ? null : Number(msg.data.duty);
-          if (pin >= 0 && pin < 48) this.onPwm?.(pin, duty);
+          if (pad >= 0) this.onPwm?.(pad, duty);
           break;
         }
         case 'framebuffer': {
@@ -349,6 +384,7 @@ export class Stm32H7Bridge {
     }
     this._connected = false;
     this._pendingInputs.clear();
+    this._guestClock.reset();
     this._disposeSession();
   }
 

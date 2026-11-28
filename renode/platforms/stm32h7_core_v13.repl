@@ -25,12 +25,68 @@ gpioPortB:
 // PWR controller — H7 firmware polls voltage-scaling-ready bits at boot.
 // The CPU model in stm32h743.repl tags the PWR region but returns 0,
 // causing infinite poll loops. Force-set the ready bits.
+// PWR_CR2 has BRRDY (bit 16) next to BREN: HAL_PWREx_EnableBkUpReg waits for
+// it, a second each of the thirty-odd times the RTC start-up calls it.
 sysbus:
     init:
         Tag <0x58024800 4> "PWR_CR1"   0x00000100
         Tag <0x58024804 4> "PWR_CSR1"  0x00002000
-        Tag <0x58024808 4> "PWR_CR2"   0x00000001
+        Tag <0x58024808 4> "PWR_CR2"   0x00010001
         Tag <0x58024818 4> "PWR_D3CR"  0x00006000
+
+// The clocks, as the firmware counts them. Renode's RCC does not keep the PLL
+// dividers, so the HAL reads SYSCLK = HCLK = PCLK = 5 MHz back (machine.freq()
+// says so) and sets SysTick and every timer for that: a reload of 4999 for
+// 1 ms, ARR 4999 for a 1 kHz PWM. stm32h743.repl clocks SysTick at 96 MHz and
+// the timers at 250 MHz, so a millisecond of the firmware lasted 52 us:
+// time.sleep_ms(3000) took 0.16 s, a pyb.Timer at 10 Hz fired 500 times a
+// second, an LVGL animation was over before it showed. At 5 MHz the firmware's
+// clock is Renode's virtual time, which follows the wall clock (behind it
+// while the host cannot keep up, faster for a while after, to catch up).
+nvic:
+    systickFrequency: 5000000
+
+timer1:
+    frequency: 5000000
+
+timer2:
+    frequency: 5000000
+
+timer3:
+    frequency: 5000000
+
+timer4:
+    frequency: 5000000
+
+timer5:
+    frequency: 5000000
+
+timer6:
+    frequency: 5000000
+
+timer7:
+    frequency: 5000000
+
+timer8:
+    frequency: 5000000
+
+timer12:
+    frequency: 5000000
+
+timer13:
+    frequency: 5000000
+
+timer14:
+    frequency: 5000000
+
+timer15:
+    frequency: 5000000
+
+timer16:
+    frequency: 5000000
+
+timer17:
+    frequency: 5000000
 
 // QSPI flash — W25Q128 (16 MB) on board V13 (CS=PB6 SCK=PB2 IO0..3=PF8/9/7/6).
 // Without a slave device, STM32H7_QuadSPI throws NRE on transfer trigger.
