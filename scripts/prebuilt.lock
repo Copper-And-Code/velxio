@@ -10,7 +10,7 @@
 # A new build: publish it there, then change its line here.
 
 tar  https://github.com/Copper-And-Code/qemu-picsimlab/releases/download/velxio-2026.11.27c/velxio-qemu-esp32-velxio-2026.11.27c-linux-x86_64.tar.gz  f7bcc5e6fa6c48563406ded71be11206ade64145a82cb1c08cb9f580bce88b0e  prebuilt/qemu
-tar  https://github.com/Copper-And-Code/qemu-rp2040-pico/releases/download/velxio-2026.11.27b/velxio-qemu-rp2350-velxio-2026.11.27b-linux-x86_64.tar.gz  1eb60248598963c56bdd419326f445098f0bcbbc3084fce114c56adb890bc0fb  prebuilt/qemu
+tar  https://github.com/Copper-And-Code/qemu-rp2040-pico/releases/download/velxio-2026.11.27c/velxio-qemu-rp2350-velxio-2026.11.27c-linux-x86_64.tar.gz  ca90aa03e2f60a10e4d29370b771c13e487bee6b903f14229a40052646480a48  prebuilt/qemu
 
 file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/ESP32_4848S040-VELXIO-v0.1.8-24-g92363ea.bin  c5abfcc51e975ce03587266bef3867fbd48254204edce2fb161ec66b749e9a5d  frontend/public/firmware/micropython-esp32-4848s040-velxio.bin
 file https://github.com/Copper-And-Code/copper-and-code-mcu-boards/releases/download/velxio-2026.11.26/WAVESHARE_RP2350_TOUCH_LCD_4-VELXIO-v0.1.8-24-g92363ea.uf2  08f9fb408b99001c01e40a53d2f387c9d19fc4b6f93a5b46fbc5fc4c62c5d38f  prebuilt/rp2350/waveshare-rp2350-lcd4-velxio.uf2
